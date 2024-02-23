@@ -1,0 +1,19 @@
+.vscode
+vms
+a.cpp
+
+*.asm
+
+*.o
+*.obj
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
