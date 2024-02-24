@@ -15,6 +15,10 @@ bool virtual_machine::is_keyword(const std::string &lexem) {
     return (keywords_.find(lexem) != keywords_.end());
 }
 
+bool virtual_machine::is_mem_seg(const std::string &lexem) {
+    return (mem_seg_.find(lexem) != mem_seg_.end());
+}
+
 bool virtual_machine::is_label(const std::string &lexem) {
     if (std::isdigit(lexem[0])) return false;
 
@@ -35,9 +39,14 @@ bool virtual_machine::is_number(const std::string &lexem) {
     return true;
 }
 
-virtual_machine::keyword_type virtual_machine::get_keyword_type(std::string &lexem) {
+virtual_machine::keyword_type virtual_machine::get_keyword_type(const std::string &lexem) {
     keyword_type type = keywords_.find(lexem)->second;
     return type;
+}
+
+virtual_machine::mem_segment virtual_machine::get_mem_segment(const std::string &lexem) {
+    mem_segment seg = mem_seg_.find(lexem)->second;
+    return seg;
 }
 
 int virtual_machine::lex() {
@@ -48,6 +57,8 @@ int virtual_machine::lex() {
         } else if (!current_lexem.empty()) {
             if (is_keyword(current_lexem)) {
                 tokens_.push_back(token{KEYWORD, get_keyword_type(current_lexem)});
+            } else if (is_mem_seg(current_lexem)) {
+                tokens_.push_back({token{MEM_SEG, get_mem_segment(current_lexem)}});
             } else if (is_label(current_lexem)) {;
                 tokens_.push_back(token{LABELNAME, current_lexem});
             } else if (is_number(current_lexem)) {
@@ -63,9 +74,16 @@ int virtual_machine::lex() {
     return 0;
 }
 
-void virtual_machine::parse() {
+//add error check
+
+int virtual_machine::parse() {
     for (int index = 0; index < tokens_.size(); ) {
         token t = tokens_[index];
+        if (t.type != KEYWORD) {
+            print_err(t, KEYWORD);
+            return 1;
+        }
+
         keyword_type keyword = std::get<keyword_type>(t.value);
         
         switch(keyword) {
@@ -87,26 +105,50 @@ void virtual_machine::parse() {
             break;
 
         case LABEL:
+            if (tokens_[index + 1].type != LABELNAME) {
+                print_err(tokens_[index + 1], LABELNAME);
+                return 1;
+            }
             compile_label(tokens_[index + 1]);
             index += 2;
             break;
 
         case FUNCTION:
+            if (tokens_[index + 1].type != LABELNAME) {
+                print_err(tokens_[index + 1], LABELNAME);
+                return 1;
+            }
+            if (tokens_[index + 2].type != NUMBER) {
+                print_err(tokens_[index + 2], NUMBER);
+                return 1;
+            }
             compile_function(tokens_[index + 1], tokens_[index + 2]);
             index += 3;
             break;
 
         case GOTO:
+            if (tokens_[index + 1].type != LABELNAME) {
+                print_err(tokens_[index + 1], LABELNAME);
+                return 1;
+            }
             compile_goto(tokens_[index + 1]);
             index += 2;
             break;
 
         case IFGOTO:
+            if (tokens_[index + 1].type != LABELNAME) {
+                print_err(tokens_[index + 1], LABELNAME);
+                return 1;
+            }
             compile_ifgoto(tokens_[index + 1]);
             index += 2;
             break;
 
         case CALL:
+            if (tokens_[index + 1].type != LABELNAME) {
+                print_err(tokens_[index + 1], LABELNAME);
+                return 1;
+            }
             compile_call(tokens_[index + 1]);
             index += 2;
             break;
@@ -117,20 +159,37 @@ void virtual_machine::parse() {
             break;
 
         case PUSH:
+            if (tokens_[index + 1].type != MEM_SEG) {
+                print_err(tokens_[index + 1], MEM_SEG);
+                return 1;
+            }
+            if (tokens_[index + 2].type != NUMBER) {
+                print_err(tokens_[index + 2], NUMBER);
+                return 1;
+            }
             compile_push(tokens_[index + 1], tokens_[index + 2]);
             index += 3;
             break;
         
         case POP:
+            if (tokens_[index + 1].type != MEM_SEG) {
+                print_err(tokens_[index + 1], MEM_SEG);
+                return 1;
+            }
+            if (tokens_[index + 2].type != NUMBER) {
+                print_err(tokens_[index + 2], NUMBER);
+                return 1;
+            }
             compile_pop(tokens_[index + 1], tokens_[index + 2]);
             index += 3;
             break;
-
         }
     }
+    
+    return 0;
 }
 
-void virtual_machine::compile_2op_instr(keyword_type t) {
+void virtual_machine::compile_2op_instr(const keyword_type t) {
     output_ << "lw t0, 4(sp)\n"
             << "lw t1, (sp)\n";
     
@@ -161,7 +220,7 @@ void virtual_machine::compile_2op_instr(keyword_type t) {
             << "addi sp, sp, 4\n";
 }
 
-void virtual_machine::compile_1op_instr(keyword_type t) {
+void virtual_machine::compile_1op_instr(const keyword_type t) {
     output_ << "lw t0, (sp)\n";
     switch (t) {
     
@@ -177,11 +236,11 @@ void virtual_machine::compile_1op_instr(keyword_type t) {
     output_ << "sw t0, (sp)\n";
 }
 
-void virtual_machine::compile_label(token arg1) {
+void virtual_machine::compile_label(const token arg1) {
     output_ << std::get<std::string>(arg1.value) << ":\n";
 }
 
-void virtual_machine::compile_function(token arg1, token arg2) {
+void virtual_machine::compile_function(const token arg1, const token arg2) {
     std::string label = std::get<std::string>(arg1.value);
     int local_count = std::get<int>(arg2.value);
 
@@ -199,25 +258,25 @@ void virtual_machine::compile_return() {
             << "ret";
 }
 
-void virtual_machine::compile_call(token arg1) {
+void virtual_machine::compile_call(const token arg1) {
     std::string label = std::get<std::string>(arg1.value);
     output_ << "jal " << label << '\n';
 }
 
-void virtual_machine::compile_goto(token arg1) {
+void virtual_machine::compile_goto(const token arg1) {
     std::string label = std::get<std::string>(arg1.value);
     output_ << "j " << label << '\n';
 }
 
-void virtual_machine::compile_ifgoto(token arg1) {
+void virtual_machine::compile_ifgoto(const token arg1) {
     std::string label = std::get<std::string>(arg1.value);
     output_ << "lw t0, (sp)\n"
             << "addi sp, sp, 4\n"
             << "bnez t0, " << label << '\n';
 }
 
-void virtual_machine::compile_push(token arg1, token arg2) {
-    keyword_type segment = std::get<keyword_type>(arg1.value);
+void virtual_machine::compile_push(const token arg1, const token arg2) {
+    mem_segment segment = std::get<mem_segment>(arg1.value);
     int seg_num = std::get<int>(arg2.value);
     int seg_offset = seg_num * 4;
 
@@ -243,8 +302,8 @@ void virtual_machine::compile_push(token arg1, token arg2) {
     }
 }
 
-void virtual_machine::compile_pop(token arg1, token arg2) {
-    keyword_type segment = std::get<keyword_type>(arg1.value);
+void virtual_machine::compile_pop(const token arg1, const token arg2) {
+    mem_segment segment = std::get<mem_segment>(arg1.value);
     int seg_num = std::get<int>(arg2.value);
     int seg_offset = seg_num * 4;
 
@@ -266,7 +325,12 @@ void virtual_machine::compile_pop(token arg1, token arg2) {
     output_ << "addi sp, sp, 4\n";
 }
 
-
 void virtual_machine::print() {
     std::cout << output_.str();
+}
+
+void virtual_machine::print_err(token t, token_type expected) {
+    std::string type = token_type_to_str_.find(t.type)->second;
+    std::string expected_type = token_type_to_str_.find(expected)->second;
+    std::cerr << "Invalid token " << type << ", expected " << expected_type << std::endl;
 }
