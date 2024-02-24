@@ -71,8 +71,11 @@ int main(int argc, char** argv) {
 
     virtual_machine vm(input_texts[0]);
     if (vm.lex()) return 1;
-    vm.parse();
-    vm.print();
+    if (vm.parse()) return 1;
+
+    std::ofstream output("output.asm");
+    vm.set_output_file(output);
+    vm.print_to_file();
 
     return 0;
 }

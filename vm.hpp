@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <variant>
+#include <fstream>
 
 class virtual_machine {
     enum token_type {
@@ -117,8 +118,17 @@ class virtual_machine {
 
     void print_err(const token, const token_type);
 
+    std::string text_;
+    std::vector<token> tokens_;    
+    std::stringstream output_;
+    std::ofstream file_output_;
+
 public:
     virtual_machine(std::string &);
+
+    void set_output_file(std::ofstream&);
+
+    void print_to_file();
 
     int lex();
 
@@ -126,7 +136,4 @@ public:
 
     void print();
 
-    std::string text_;
-    std::vector<token> tokens_;
-    std::stringstream output_;
 };

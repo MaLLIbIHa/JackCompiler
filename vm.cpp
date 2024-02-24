@@ -329,6 +329,14 @@ void virtual_machine::print() {
     std::cout << output_.str();
 }
 
+void virtual_machine::set_output_file(std::ofstream &file) {
+    file_output_ = std::move(file);
+}
+
+void virtual_machine::print_to_file() {
+    file_output_ << output_.str();
+}
+
 void virtual_machine::print_err(token t, token_type expected) {
     std::string type = token_type_to_str_.find(t.type)->second;
     std::string expected_type = token_type_to_str_.find(expected)->second;
