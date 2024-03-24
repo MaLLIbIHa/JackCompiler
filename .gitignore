@@ -1,12 +1,16 @@
 .vscode
-vms
+vm_progs
+vm_inheritance
 a.cpp
 
 *.asm
 
 *.o
 *.obj
-
+ast.txt
+*.vm
+*.jack
+*.XML
 # Compiled Static libraries
 *.lai
 *.la

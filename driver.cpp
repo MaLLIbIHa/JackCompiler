@@ -4,7 +4,17 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include "vm.hpp"
+#include "vm\vm.hpp"
+#include "vm\lexer.hpp"
+#include "vm\parser.hpp"
+#include "compiler\lexer.hpp"
+#include "compiler\token.hpp"
+#include "compiler\symbol_table.hpp"
+#include "compiler\ast.hpp"
+#include "compiler\PrintVisitor.hpp"
+#include "compiler\classVisitor.hpp"
+#include "compiler\parser.hpp"
+
 
 bool check_err(std::error_code &ec) {
     bool err = static_cast<bool>(ec);
@@ -14,10 +24,10 @@ bool check_err(std::error_code &ec) {
     return err;
 }
 
-bool read_vm_file(std::filesystem::path path, 
-                  std::vector<std::string> &buffer, 
-                  std::vector<std::string> &filenames) {
-    if (path.extension() != ".vm") return false;
+bool read_jack_file(std::filesystem::path path, 
+                    std::vector<std::string> &buffer, 
+                    std::vector<std::string> &filenames) {
+    if (path.extension() != ".jack") return false;
 
     std::ifstream source_file(path.string());
     if (source_file.is_open()) {
@@ -52,11 +62,11 @@ int main(int argc, char** argv) {
             if (check_err(ec)) return 1;
 
             for (const auto &entry : std::filesystem::directory_iterator(path)) {
-                if (read_vm_file(entry.path(), input_texts, filenames)) return 1;
+                if (read_jack_file(entry.path(), input_texts, filenames)) return 1;
             }
 
         } else {
-            if (read_vm_file(path, input_texts, filenames)) return 1;
+            if (read_jack_file(path, input_texts, filenames)) return 1;
         }
 
     } else {
@@ -69,13 +79,22 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    virtual_machine vm(input_texts[0]);
-    if (vm.lex()) return 1;
-    if (vm.parse()) return 1;
+    // compiler::lexer lex(input_texts[0]);
+    // std::vector<compiler::token> toks = lex.lex();
+    // compiler::parser p(toks);
+    // std::shared_ptr<compiler::program> prog = p.parse_program();
+    // compiler::PrintVisitor classVis;
+    // classVis.traversal(prog);
 
-    std::ofstream output("output.asm");
-    vm.set_output_file(output);
-    vm.print_to_file();
+
+    lexer l;
+    parser p;
+    auto out = p(l(input_texts[0]));
+    std::cout << out;
+
+    // std::ofstream output("output.asm");
+    // set_output_file(output);
+    // print_to_file();
 
     return 0;
 }
