@@ -3,33 +3,46 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include "node_descriptors.hpp"
 
-namespace compiler {
-
-enum symbol_type {
+enum class symbol_type {
     CLASS_SYM,
     VARIABLE_SYM,
     SUBROUTINE_SYM,
 };
 
-enum subroutine_type {
-    CONSTRUCTOR_S,
-    FUNCTION_S,
-    METHOD_S,
-};
-
-enum var_modifier {
-    ARG_V,
-    LOCAL_V,
-    STATIC_V,
-    FIELD_V,
-};
-
 class symbol_node {
 public:
+    symbol_node() = default;
+    symbol_node(std::string name,
+                unsigned line_pos,
+                unsigned in_line_pos 
+               ) 
+               : name_(name),
+                 line_pos_(line_pos),
+                 in_line_pos_(in_line_pos) 
+                 {}
+
     virtual symbol_type get_symbol_type() = 0;
 
     virtual ~symbol_node() = default;
+
+    void set_name(std::string name) { name_ = name; }
+
+    void set_line_pos(unsigned int line_pos) { line_pos_ = line_pos; }
+
+    void set_in_line_pos(unsigned int in_line_pos) { in_line_pos_ = in_line_pos; }
+
+    std::string get_name() { return name_; }
+
+    unsigned int get_in_line_pos() { return in_line_pos_; }
+
+    unsigned int get_line_pos() { return line_pos_; } 
+
+protected:
+    std::string name_;
+    unsigned line_pos_ = 0;
+    unsigned in_line_pos_ = 0;
 };
 
 class symbol_table {
@@ -42,12 +55,12 @@ public:
         return nullptr;
     }
 
-    void insert(std::string name, std::shared_ptr<symbol_node> symbol) {
+    bool insert(std::string name, std::shared_ptr<symbol_node> symbol) {
         if (table_.find(name) != table_.end()) {
-            //error
-            //member already exist
+            return false;
         }
         table_[name] = symbol;
+        return true;
     }
 
     void clear() {
@@ -61,14 +74,14 @@ private:
 class class_symbol : public symbol_node {
 public:
     class_symbol() = default;
-    class_symbol(std::string name, int field_count) 
-                : name_(name), field_count_(field_count) {}
+    class_symbol(std::string name, 
+                 int field_count,
+                 unsigned line_pos,
+                 unsigned in_line_pos)
+                : symbol_node(name, line_pos, in_line_pos),
+                  field_count_(field_count) {}
 
-    symbol_type get_symbol_type() override { return CLASS_SYM; }
-
-    void set_name(std::string name) { name_ = name; }
-
-    std::string get_name() { return name_; }
+    symbol_type get_symbol_type() override { return symbol_type::CLASS_SYM; }
 
     void set_field_count(int count) { field_count_ = count; }
 
@@ -84,32 +97,36 @@ public:
 
     void clear() {
         sym_table_.clear();
+        name_.clear();
     }
 
 private:
-    std::string name_;
     symbol_table sym_table_;
-    int field_count_;
+    int field_count_ = 0;
 };
 
 class subroutine_symbol : public symbol_node {
 public:
     subroutine_symbol() = default;
 
-    subroutine_symbol(subroutine_type s_type,
+    subroutine_symbol(std::string name,
                       std::string ret_t,
-                      std::vector<std::string> args
+                      std::vector<std::string> args,
+                      subroutine_kind s_type,
+                      unsigned line_pos,
+                      unsigned in_line_pos
                      )
-                     : s_type_(s_type),
+                     : symbol_node(name, line_pos, in_line_pos),
                        ret_type_(ret_t),
-                       args_types_(args)
+                       args_types_(args),
+                       s_type_(s_type)
                        {}
 
-    symbol_type get_symbol_type() override { return SUBROUTINE_SYM; }
+    symbol_type get_symbol_type() override { return symbol_type::SUBROUTINE_SYM; }
 
-    void set_kind(subroutine_type kind) { s_type_ = kind; }
+    void set_kind(subroutine_kind kind) { s_type_ = kind; }
 
-    subroutine_type get_kind() { return s_type_; }
+    subroutine_kind get_kind() { return s_type_; }
 
     void set_ret_type(std::string ret_type) { ret_type_ = ret_type; }
 
@@ -124,24 +141,28 @@ public:
     int get_arg_count() { return args_types_.size(); }
 
 private:
-    subroutine_type s_type_;
     std::string ret_type_;
     std::vector<std::string> args_types_;
+    subroutine_kind s_type_;
 };
 
 class var_symbol : public symbol_node {
 public:
     var_symbol() = default;
 
-    var_symbol(std::string v_type,
+    var_symbol(std::string name,
+               std::string v_type,
                var_modifier v_mod,
-               int index
+               int index,
+               unsigned line_pos,
+               unsigned in_line_pos
                )
-               : v_type_(v_type),
+               : symbol_node(name, line_pos, in_line_pos),
+                 v_type_(v_type),
                  v_mod_(v_mod),
                  v_index_(index) {}
 
-    symbol_type get_symbol_type() override { return VARIABLE_SYM; }
+    symbol_type get_symbol_type() override { return symbol_type::VARIABLE_SYM; }
 
     void set_type(std::string type) { v_type_ = type; }
 
@@ -158,6 +179,5 @@ public:
 private:
     std::string v_type_;
     var_modifier v_mod_;
-    int v_index_;
+    int v_index_ = 0;
 };
-}

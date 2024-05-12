@@ -1,22 +1,20 @@
 #pragma once
 #include "ast.hpp"
-#include "symbol_table.hpp"
 #include "token.hpp"
+#include "lexer.hpp"
 
-namespace compiler {
-
-enum associativity {
+enum class associativity {
     LEFT_ASC,
     RIGHT_ASC,
 };
 
 extern std::map<std::string, std::pair<int, associativity>> op_info_;
 
-class parser {
+class parser final {
 public:
-    parser(std::vector<token> tokens);
+    parser(std::string sourceText);
 
-    parser(std::vector<token> tokens, std::shared_ptr<program> prog);
+    parser(std::string sourceText, std::shared_ptr<program> prog);
 
     //Main parsing methods
     std::shared_ptr<program> parse_program();
@@ -24,9 +22,9 @@ public:
 private:
     std::shared_ptr<class_dec> parse_class();
 
-    std::shared_ptr<subrtn_dec> parse_subrtn_dec(token subrtn_kind);
+    std::shared_ptr<subroutine_dec> parse_subroutine_dec(token subrtn_kind);
 
-    std::shared_ptr<subrtn_body> parse_subrtn_body();
+    std::shared_ptr<subroutine_body> parse_subroutine_body();
 
     std::shared_ptr<statement_list> parse_statements();
 
@@ -61,20 +59,6 @@ private:
                                               std::shared_ptr<expression> second_operand);
 
     //Token stream functions
-    token consume(keyword_symbol type);
-
-    token consume(token_type type);
-
-    token consume();
-
-    token consume_type();
-
-    token current();
-
-    token next();
-
-    bool has_tokens();
-
     bool is_type(token tok);
 
     bool is_unary_op(token tok);
@@ -87,7 +71,15 @@ private:
 
     bool is_constant_literal(token tok);
 
+    token consume(token_type type);
+
+    token consume(token_kind kind);
+
+    token consume();
+
     int get_prec(token tok);
+
+    void set_position(std::shared_ptr<node> node, token tok);
 
     associativity get_asc(token tok);
 
@@ -95,13 +87,17 @@ private:
 
     var_modifier token_to_var_modifier(token mod_tok);
 
-    subroutine_type token_to_subrtn_type(token type_tok);
+    subroutine_kind token_to_subroutine_kind(token type_tok);
+
+    literal_type token_to_literal_type(token kind);
 
     //Error output functions
-    void expected_err(keyword_symbol tok);
+    void print_expected_err(token_kind kind, unsigned line_pos, unsigned in_line_pos);
+
+    void print_expected_err(token_type type, unsigned line_pos, unsigned in_line_pos);
+
+    void print_expected_err(const char *err_msg, unsigned line_pos, unsigned in_line_pos);
 
     std::shared_ptr<program> prog_;
-    std::vector<token> tokens_;
-    std::size_t current_token_ = 0;
+    lexer lexer_;
 };
-}

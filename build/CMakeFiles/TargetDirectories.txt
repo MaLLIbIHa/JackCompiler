@@ -1,3 +1,0 @@
-D:/VS Code/risc-v/build/CMakeFiles/JackCompiler.dir
-D:/VS Code/risc-v/build/CMakeFiles/edit_cache.dir
-D:/VS Code/risc-v/build/CMakeFiles/rebuild_cache.dir
