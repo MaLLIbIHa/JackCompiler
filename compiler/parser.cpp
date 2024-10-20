@@ -1,245 +1,227 @@
-#include "parser.hpp"
+#include "Parser.hpp"
 
-std::map<std::string, std::pair<int, associativity>> op_info_ = {{"||" , {1, associativity::LEFT_ASC}},
-                                                                 {"&&" , {2, associativity::LEFT_ASC}},
-                                                                 {"|"  , {3, associativity::LEFT_ASC}},
-                                                                 {"&"  , {4, associativity::LEFT_ASC}},
-                                                                 {"==" , {5, associativity::LEFT_ASC}},
-                                                                 {"+"  , {6, associativity::LEFT_ASC}},
-                                                                 {"-"  , {6, associativity::LEFT_ASC}},
-                                                                 {"*"  , {7, associativity::LEFT_ASC}},
-                                                                 {"/"  , {7, associativity::LEFT_ASC}},
-                                                                 {"-u" , {8, associativity::RIGHT_ASC}},
-                                                                 {"~"  , {8, associativity::RIGHT_ASC}},
-                                                                 {"."  , {9, associativity::LEFT_ASC}},
-                                                                 {"["  , {9, associativity::LEFT_ASC}},
-                                                                 {"("  , {9, associativity::LEFT_ASC}},};
+std::map<std::string, std::pair<int, Associativity>> opInfo_ =  {{"||" , {1, Associativity::LEFT_ASC}},
+                                                                 {"&&" , {2, Associativity::LEFT_ASC}},
+                                                                 {"|"  , {3, Associativity::LEFT_ASC}},
+                                                                 {"&"  , {4, Associativity::LEFT_ASC}},
+                                                                 {"==" , {5, Associativity::LEFT_ASC}},
+                                                                 {"<"  , {6, Associativity::LEFT_ASC}},
+                                                                 {">"  , {6, Associativity::LEFT_ASC}},
+                                                                 {"+"  , {7, Associativity::LEFT_ASC}},
+                                                                 {"-"  , {7, Associativity::LEFT_ASC}},
+                                                                 {"*"  , {8, Associativity::LEFT_ASC}},
+                                                                 {"/"  , {8, Associativity::LEFT_ASC}},
+                                                                 {"-u" , {9, Associativity::RIGHT_ASC}},
+                                                                 {"~"  , {9, Associativity::RIGHT_ASC}},
+                                                                 {"."  , {10, Associativity::LEFT_ASC}},
+                                                                 {"["  , {10, Associativity::LEFT_ASC}},
+                                                                 {"("  , {10, Associativity::LEFT_ASC}},};
 
-parser::parser(std::string sourceText) : lexer_(sourceText) {
-    prog_ = std::make_shared<program>();
+Parser::Parser(std::string fileName, std::string sourceText)
+    : fileUnit_(std::make_unique<FileUnit>(fileName)), 
+      lexer_(std::make_unique<Lexer>(sourceText))
+    {}
+
+std::shared_ptr<FileUnit> Parser::parseFileUnit() {
+    while(lexer_->hasTokens()) {
+        ClassDec* classDec = parseClass();
+        fileUnit_->addClass(classDec);
+    }
+
+    return fileUnit_;
 }
 
-parser::parser(std::string sourceText,
-               std::shared_ptr<program> prog
-              )
-              : lexer_(sourceText), prog_(prog) {}
+ClassDec* Parser::parseClass() {
+    auto classNode = std::make_shared<ClassDec>();
+    auto memberVarList = std::make_shared<FieldVariableList>();
+    auto staticVarList = std::make_shared<StaticVariableList>();
+    auto subrtnList = std::make_shared<SubroutineList>();
 
-std::shared_ptr<program> parser::parse_program() {
-    std::shared_ptr<class_dec> class_dec;
+    Token classKeyword = consume(TokenKind::CLASS);
 
-    while(lexer_.hasTokens()) {
-        class_dec = parse_class();
-        prog_->add_class(class_dec);
-        class_dec->set_parent(prog_);
+    std::string className = consume(TokenType::IDENTIFIER).getValue();
+    classNode->setName(className);
+    setPosition(classNode, classKeyword);
+
+    consume(TokenKind::LBRACE);
+
+    while (lexer_->hasTokens() && isClassVarDec(lexer_->currentToken())) {
+        Token varKindTok = consume();
+        if (varKindTok.getKind() == TokenKind::STATIC) {
+            parseVarDec(varKindTok, staticVarList);
+        } else if (varKindTok.getKind() == TokenKind::FIELD) {
+            parseVarDec(varKindTok, memberVarList);
+        }
     }
-    return prog_;
+
+    while (lexer_->hasTokens() && isFuncDec(lexer_->currentToken())) {
+        std::shared_ptr<SubroutineDec> subrtn = parseSubroutineDec(consume());
+        subrtnList->addSubroutine(subrtn);
+        subrtn->setParent(subrtnList);
+    }
+
+    consume(TokenKind::RBRACE);
+    classNode->addFieldVarList(memberVarList);
+    memberVarList->setParent(classNode);
+    classNode->addStaticVarList(staticVarList);
+    staticVarList->setParent(classNode);
+    classNode->addSubroutineList(subrtnList);
+    subrtnList->setParent(classNode);
+
+    return classNode;
 }
 
-std::shared_ptr<class_dec> parser::parse_class() {
-    std::shared_ptr<class_dec> class_node = std::make_shared<class_dec>();
-    std::shared_ptr<variable_dec_list> var_list = std::make_shared<variable_dec_list>();
-    std::shared_ptr<subroutine_list> subrtn_list = std::make_shared<subroutine_list>();
+void Parser::parseVarDec(Token varKind, 
+                         std::shared_ptr<VariableDecList> varList) {
+    bool endedStmt = false;
+    VarModifier mod = tokenToVarModifier(varKind);
 
-    token class_keyword = consume(token_kind::CLASS);
-    
-    std::string class_name = consume(token_type::IDENTIFIER).get_value();
-    class_node->set_name(class_name);
-    set_position(class_node, class_keyword);
+    Type* varType = parseType();
 
-    consume(token_kind::LBRACE);
+    while(lexer_->hasTokens()) {
+        Token id = consume(TokenType::IDENTIFIER);
+        auto var = createVarDecWithMod(id.getValue(), varType, mod);
+        varList->addVar(var);
+        var->setParent(varList);
+        setPosition(var, id);
 
-    while (lexer_.hasTokens() && is_class_var_dec(lexer_.currentToken())) {
-        parse_var_dec(consume(), var_list);
-    }
-
-    while (lexer_.hasTokens() && is_func_dec(lexer_.currentToken())) {
-        std::shared_ptr<subroutine_dec> subrtn = parse_subroutine_dec(consume());
-        subrtn_list->add_subroutine(subrtn);
-        subrtn->set_parent(subrtn_list);
-    }
-
-    consume(token_kind::RBRACE);
-    class_node->add_var_list(var_list);
-    var_list->set_parent(class_node);
-    class_node->add_subroutine_list(subrtn_list);
-    subrtn_list->set_parent(class_node);
-
-    return class_node;
-}
-
-void parser::parse_var_dec(token var_kind, 
-                           std::shared_ptr<variable_dec_list> var_list) {
-    bool ended_stmt = false;
-    std::shared_ptr<variable_dec> var;
-    var_modifier mod = token_to_var_modifier(var_kind);
-
-    token type_tok = consume();
-    if ( !is_type(type_tok) ) {
-        print_expected_err("Expected type", 
-                           type_tok.get_line_pos(), 
-                           type_tok.get_in_line_pos());
-        throw std::runtime_error("Parser error");
-    }
-    std::string var_type = token_to_var_type(type_tok);
-
-    while(lexer_.hasTokens()) {
-        token id = consume(token_type::IDENTIFIER);
-        var = std::make_shared<variable_dec>(id.get_value(), var_type, mod);
-        var_list->add_var(var);
-        var->set_parent(var_list);
-        set_position(var, id);
-
-        token sep_tok = consume();
-        if (sep_tok.get_kind() == token_kind::COMMA) {
+        Token sepTok = consume();
+        if (sepTok.getKind() == TokenKind::COMMA) {
             continue;
-        } else if (sep_tok.get_kind() == token_kind::SEMICOLON) {
-            ended_stmt = true;
+        } else if (sepTok.getKind() == TokenKind::SEMICOLON) {
+            endedStmt = true;
             break;
         } else {
-            print_expected_err("Expected \",\" or \";\"", 
-                               sep_tok.get_line_pos(),
-                               sep_tok.get_in_line_pos());
+            printExpectedErr("Expected \",\" or \";\"", 
+                               sepTok.getLinePos(),
+                               sepTok.getInLinePos());
             throw std::runtime_error("Parser error");
         }
     }
 
-    if (!ended_stmt) {
-        print_expected_err("Unexpected end of statement",
-                           var_kind.get_line_pos(), 
-                           var_kind.get_in_line_pos());
+    if (!endedStmt) {
+        printExpectedErr("Unexpected end of Statement",
+                           varKind.getLinePos(), 
+                           varKind.getInLinePos());
         throw std::runtime_error("Parser error");
     }
 }
 
 // function/method/constructor type|void name ( type name, ...)
-std::shared_ptr<subroutine_dec> parser::parse_subroutine_dec(token subrtn_kind) {
-    bool ended_stmt = false;
-    std::shared_ptr<subroutine_dec> subrtn_node = std::make_shared<subroutine_dec>();
-    std::shared_ptr<variable_dec_list> arg_list = std::make_shared<variable_dec_list>();
-    std::string name;
-    std::string ret_type;
-    token ret_type_tok = lexer_.currentToken();
+std::shared_ptr<SubroutineDec> Parser::parseSubroutineDec(Token subrtnKind) {
+    bool endedStmt = false;
+    auto subrtnNode = std::make_shared<SubroutineDec>();
+    auto argList = std::make_shared<SubroutineArgumentList>();
+    Token retTypeTok = lexer_->currentToken();
 
-    if (is_type(ret_type_tok) || ret_type_tok.get_kind() == token_kind::VOID) {
-        ret_type = token_to_var_type(consume());
-    } else {
-        print_expected_err("Expected type or void",
-                           ret_type_tok.get_line_pos(),
-                           ret_type_tok.get_in_line_pos());
-        throw std::runtime_error("Parser error");
-    }
+    Type* retType = parseReturnType();
 
-    name = consume(token_type::IDENTIFIER).get_value();
-    subrtn_node->set_name(name);
-    subrtn_node->set_ret_type(ret_type);
-    subrtn_node->set_subroutine_kind(token_to_subroutine_kind(subrtn_kind));
-    set_position(subrtn_node, subrtn_kind);
+    std::string name = consume(TokenType::IDENTIFIER).getValue();
+    subrtnNode->setName(name);
+    subrtnNode->setRetType(retType);
+    subrtnNode->setSubroutineKind(tokenToSubroutineKind(subrtnKind));
+    setPosition(subrtnNode, subrtnKind);
 
-    token arg_list_begin = consume(token_kind::LPAREN);
-    set_position(arg_list, arg_list_begin);
+    Token argListBegin = consume(TokenKind::LPAREN);
+    setPosition(argList, argListBegin);
 
-    while (lexer_.hasTokens() && lexer_.currentToken().get_kind() != token_kind::RPAREN) {
-        std::shared_ptr<variable_dec> arg;
+    while (lexer_->hasTokens() && lexer_->currentToken().getKind() != TokenKind::RPAREN) {
+        Type* argType = parseType();
+        Token argId = consume(TokenType::IDENTIFIER);
+        auto arg = std::make_shared<ArgumentVarDec>(argId.getValue(), argType);
+        
+        argList->addVar(arg);
+        arg->setParent(argList);
+        setPosition(arg, argId);
 
-        token type_tok = consume();
-        if ( !is_type(type_tok) ) {
-            print_expected_err("Expected type",
-                               type_tok.get_line_pos(),
-                               type_tok.get_in_line_pos());
-            throw std::runtime_error("Parser error");
-        }
-        std::string arg_type = token_to_var_type(type_tok);
-        token arg_id = consume(token_type::IDENTIFIER);
-        arg = std::make_shared<variable_dec>(arg_id.get_value(), arg_type, var_modifier::ARG_V);
-        arg_list->add_var(arg);
-        arg->set_parent(arg_list);
-        set_position(arg, arg_id);
-
-        token sep_token = lexer_.currentToken();
-        if (sep_token.get_kind() == token_kind::COMMA) {
+        Token sepToken = lexer_->currentToken();
+        if (sepToken.getKind() == TokenKind::COMMA) {
             consume();
             continue;
-        } else if (sep_token.get_kind() == token_kind::RPAREN) {
-            ended_stmt = true;
+        } else if (sepToken.getKind() == TokenKind::RPAREN) {
+            endedStmt = true;
             break;
         } else {
-            print_expected_err("Expected \",\" or \")\"",
-                               sep_token.get_line_pos(), sep_token.get_in_line_pos());
-            std::runtime_error("Parser error");
+            printExpectedErr("Expected \",\" or \")\"",
+                               sepToken.getLinePos(), sepToken.getInLinePos());
+            throw std::runtime_error("Parser error");
         }
     }
 
-    consume(token_kind::RPAREN);
+    consume(TokenKind::RPAREN);
 
-    std::shared_ptr<subroutine_body> body = parse_subroutine_body();
-    subrtn_node->add_body(body);
-    body->set_parent(subrtn_node);
-    subrtn_node->add_arg_list(arg_list);
-    arg_list->set_parent(subrtn_node);
+    if (lexer_->currentToken().getKind() != TokenKind::SEMICOLON) {
+        std::shared_ptr<SubroutineBody> body = parseSubroutineBody();
+        subrtnNode->addBody(body);    
+        body->setParent(subrtnNode);
+    } else {
+        consume(TokenKind::SEMICOLON);
+    }
+    subrtnNode->addArgList(argList);
+    argList->setParent(subrtnNode);
 
-    return subrtn_node;
+    return subrtnNode;
 }
 
-std::shared_ptr<subroutine_body> parser::parse_subroutine_body() {
-    std::shared_ptr<subroutine_body> body = std::make_shared<subroutine_body>();
-    std::shared_ptr<variable_dec_list> var_dec_list = std::make_shared<variable_dec_list>();
-    std::shared_ptr<statement_list> stmt_list;
+std::shared_ptr<SubroutineBody> Parser::parseSubroutineBody() {
+    auto body = std::make_shared<SubroutineBody>();
+    auto varDecList = std::make_shared<LocalVariableList>();
 
-    consume(token_kind::LBRACE);
-    while (lexer_.hasTokens() && lexer_.currentToken().get_kind() == token_kind::VAR) {
-        token kind = consume(token_kind::VAR);
-        parse_var_dec(kind, var_dec_list);
+    consume(TokenKind::LBRACE);
+    while (lexer_->hasTokens() && lexer_->currentToken().getKind() == TokenKind::VAR) {
+        Token kind = consume(TokenKind::VAR);
+        parseVarDec(kind, varDecList);
     }
 
-    stmt_list = parse_statements();
-    body->set_statement_list(stmt_list);
-    stmt_list->set_parent(body);
+	auto stmtList = parseStatements();
+    body->setStatementList(stmtList);
+    stmtList->setParent(body);
 
-    body->set_var_list(var_dec_list);
-    var_dec_list->set_parent(body);
-    consume(token_kind::RBRACE);
+    body->setVarList(varDecList);
+    varDecList->setParent(body);
+    consume(TokenKind::RBRACE);
     return body;
 }
 
-std::shared_ptr<statement_list> parser::parse_statements() {
-    bool ended_body = false;
-    std::shared_ptr<statement_list> stmts = std::make_shared<statement_list>();
-    while (lexer_.hasTokens()) {
-        std::shared_ptr<statement> stmt_node;
-        token stmt_tok = lexer_.currentToken();
-        switch (stmt_tok.get_kind()) {
-        case token_kind::IF:
-            stmt_node = parse_if();
+std::shared_ptr<StatementList> Parser::parseStatements() {
+    bool endedBody = false;
+    std::shared_ptr<StatementList> stmts = std::make_shared<StatementList>();
+    while (lexer_->hasTokens()) {
+        std::shared_ptr<Statement> stmtNode;
+        Token stmtTok = lexer_->currentToken();
+        switch (stmtTok.getKind()) {
+        case TokenKind::IF:
+            stmtNode = parseIf();
             break;
-        case token_kind::LET:
-            stmt_node = parse_let();
+        case TokenKind::LET:
+            stmtNode = parseLet();
             break;
-        case token_kind::WHILE:
-            stmt_node = parse_while();
+        case TokenKind::WHILE:
+            stmtNode = parseWhile();
             break;
-        case token_kind::DO:
-            stmt_node = parse_do();
+        case TokenKind::DO:
+            stmtNode = parseDo();
             break;
-        case token_kind::RETURN:
-            stmt_node = parse_return();
+        case TokenKind::RETURN:
+            stmtNode = parseReturn();
             break;
-        case token_kind::RBRACE:
-            ended_body = true;
+        case TokenKind::RBRACE:
+            endedBody = true;
             break;
         default:
-            print_expected_err("Expected statement or \"}\"",
-                               stmt_tok.get_line_pos(),
-                               stmt_tok.get_in_line_pos());
+            printExpectedErr("Expected Statement or \"}\"",
+                               stmtTok.getLinePos(),
+                               stmtTok.getInLinePos());
             throw std::runtime_error("Parser error");
         }
         
-        if (stmt_node != nullptr) {
-            stmts->add_statement(stmt_node);
-            stmt_node->set_parent(stmts);
-            set_position(stmt_node, stmt_tok);
+        if (stmtNode != nullptr) {
+            stmts->addStatement(stmtNode);
+            stmtNode->setParent(stmts);
+            setPosition(stmtNode, stmtTok);
         }
 
-        if (ended_body) {
+        if (endedBody) {
             break;
         }
     }
@@ -247,490 +229,576 @@ std::shared_ptr<statement_list> parser::parse_statements() {
 }
 
 
-std::shared_ptr<statement> parser::parse_if() {
-    std::shared_ptr<if_statement> if_stmt = std::make_shared<if_statement>();
-    std::shared_ptr<expression> condition;
-    std::shared_ptr<statement_list> body;
-    token if_tok = consume(token_kind::IF);
-    set_position(if_stmt, if_tok);
-    consume(token_kind::LPAREN);
-    condition = parse_expression();
-    if_stmt->add_condition(condition);
-    condition->set_parent(if_stmt);
-    consume(token_kind::RPAREN);
-    consume(token_kind::LBRACE);
-    body = parse_statements();
-    if_stmt->add_if_body(body);
-    body->set_parent(if_stmt);
-    consume(token_kind::RBRACE);
-    if (lexer_.currentToken().get_kind() == token_kind::ELSE) {
-        consume(token_kind::ELSE);
-        consume(token_kind::LBRACE);
-        body = parse_statements();
-        if_stmt->add_else_body(body);
-        body->set_parent(if_stmt);
-        consume(token_kind::RBRACE);
+std::shared_ptr<Statement> Parser::parseIf() {
+    std::shared_ptr<IfStatement> ifStmt = std::make_shared<IfStatement>();
+    std::shared_ptr<Expression> condition;
+    std::shared_ptr<StatementList> body;
+    Token ifTok = consume(TokenKind::IF);
+    setPosition(ifStmt, ifTok);
+    consume(TokenKind::LPAREN);
+    condition = parseExpression();
+    ifStmt->addCondition(condition);
+    condition->setParent(ifStmt);
+    consume(TokenKind::RPAREN);
+    consume(TokenKind::LBRACE);
+    body = parseStatements();
+    ifStmt->addIfBody(body);
+    body->setParent(ifStmt);
+    consume(TokenKind::RBRACE);
+    if (lexer_->currentToken().getKind() == TokenKind::ELSE) {
+        consume(TokenKind::ELSE);
+        consume(TokenKind::LBRACE);
+        body = parseStatements();
+        ifStmt->addElseBody(body);
+        body->setParent(ifStmt);
+        consume(TokenKind::RBRACE);
     }
-    return if_stmt;
+    return ifStmt;
 }
 
-std::shared_ptr<statement> parser::parse_let() {
-    std::shared_ptr<let_statement> let_stmt = std::make_shared<let_statement>();
-    std::shared_ptr<expression> lhs;
-    std::shared_ptr<expression> rhs;
-    token let_tok = consume(token_kind::LET);
-    set_position(let_stmt, let_tok);
-    lhs = parse_expression();
-    let_stmt->add_lhs(lhs);
-    lhs->set_parent(let_stmt);
-    consume(token_kind::ASSIGN);
-    rhs = parse_expression();
-    let_stmt->add_rhs(rhs);
-    rhs->set_parent(let_stmt);
-    consume(token_kind::SEMICOLON);
-    return let_stmt;
+std::shared_ptr<Statement> Parser::parseLet() {
+    auto letStmt = std::make_shared<LetStatement>();
+    std::shared_ptr<Expression> lhs;
+    std::shared_ptr<Expression> rhs;
+    Token letTok = consume(TokenKind::LET);
+    setPosition(letStmt, letTok);
+    lhs = parseExpression();
+    letStmt->addLhs(lhs);
+    lhs->setParent(letStmt);
+    consume(TokenKind::ASSIGN);
+    rhs = parseExpression();
+    letStmt->addRhs(rhs);
+    rhs->setParent(letStmt);
+    consume(TokenKind::SEMICOLON);
+    return letStmt;
 }
 
-std::shared_ptr<statement> parser::parse_while() {
-    std::shared_ptr<while_statement> while_stmt = std::make_shared<while_statement>();
-    std::shared_ptr<expression> condition;
-    std::shared_ptr<statement_list> body;
-    token while_tok = consume(token_kind::WHILE);
-    set_position(while_stmt, while_tok);
-    consume(token_kind::LPAREN);
-    condition = parse_expression();
-    while_stmt->add_condition(condition);
-    condition->set_parent(while_stmt);
-    consume(token_kind::RPAREN);
-    consume(token_kind::LBRACE);
-    body = parse_statements();
-    while_stmt->add_body(body);
-    body->set_parent(while_stmt);
-    consume(token_kind::RBRACE);
-    return while_stmt;
+std::shared_ptr<Statement> Parser::parseWhile() {
+    auto whileStmt = std::make_shared<WhileStatement>();
+    std::shared_ptr<Expression> condition;
+    std::shared_ptr<StatementList> body;
+    Token whileTok = consume(TokenKind::WHILE);
+    setPosition(whileStmt, whileTok);
+    consume(TokenKind::LPAREN);
+    condition = parseExpression();
+    whileStmt->addCondition(condition);
+    condition->setParent(whileStmt);
+    consume(TokenKind::RPAREN);
+    consume(TokenKind::LBRACE);
+    body = parseStatements();
+    whileStmt->addBody(body);
+    body->setParent(whileStmt);
+    consume(TokenKind::RBRACE);
+    return whileStmt;
 }
 
-std::shared_ptr<statement> parser::parse_return() {
-    std::shared_ptr<return_statement> ret_stmt = std::make_shared<return_statement>();
-    std::shared_ptr<expression> ret_expr;
-    token ret_tok = consume(token_kind::RETURN);
-    set_position(ret_stmt, ret_tok);
-    if (lexer_.currentToken().get_kind() == token_kind::SEMICOLON) {
-        consume(token_kind::SEMICOLON);
-        ret_stmt->add_ret_expr(nullptr);
-        return ret_stmt;
+std::shared_ptr<Statement> Parser::parseReturn() {
+    auto retStmt = std::make_shared<ReturnStatement>();
+    std::shared_ptr<Expression> retExpr;
+    Token retTok = consume(TokenKind::RETURN);
+    setPosition(retStmt, retTok);
+    if (lexer_->currentToken().getKind() == TokenKind::SEMICOLON) {
+        consume(TokenKind::SEMICOLON);
+        retStmt->addRetExpr(nullptr);
+        return retStmt;
     }
-    ret_expr = parse_expression();
-    ret_stmt->add_ret_expr(ret_expr);
-    ret_expr->set_parent(ret_stmt);
-    consume(token_kind::SEMICOLON);
-    return ret_stmt;
+    retExpr = parseExpression();
+    retStmt->addRetExpr(retExpr);
+    retExpr->setParent(retStmt);
+    consume(TokenKind::SEMICOLON);
+    return retStmt;
 }
 
-std::shared_ptr<statement> parser::parse_do() {
-    std::shared_ptr<do_statement> do_stmt = std::make_shared<do_statement>();
-    std::shared_ptr<expression> call_expr;
-    token do_tok = consume(token_kind::DO);
-    set_position(do_stmt, do_tok);
-    call_expr = parse_expression();
-    do_stmt->add_call_expr(call_expr);
-    call_expr->set_parent(do_stmt);
-    consume(token_kind::SEMICOLON);
-    return do_stmt;
+std::shared_ptr<Statement> Parser::parseDo() {
+    auto doStmt = std::make_shared<DoStatement>();
+    std::shared_ptr<Expression> callExpr;
+    Token doTok = consume(TokenKind::DO);
+    setPosition(doStmt, doTok);
+    callExpr = parseExpression();
+    doStmt->addCallExpr(callExpr);
+    callExpr->setParent(doStmt);
+    consume(TokenKind::SEMICOLON);
+    return doStmt;
 }
 
-std::shared_ptr<expression> parser::parse_expression(int prev_prec) {
-    std::shared_ptr<expression> first_operand = parse_term();
-    std::shared_ptr<expression> second_operand;
-    std::shared_ptr<expression> new_binop;
-    while ( is_binary_op(lexer_.currentToken()) && get_prec(lexer_.currentToken()) >= prev_prec) {
-        token op = consume();
-        int next_prec = get_prec(op);
-        if (get_asc(op) == associativity::LEFT_ASC) {
-            next_prec++;
+std::shared_ptr<Expression> Parser::parseExpression(int prevPrec) {
+    std::shared_ptr<Expression> firstOperand = parseTerm();
+    std::shared_ptr<Expression> secondOperand;
+    std::shared_ptr<Expression> newBinop;
+    while ( isBinaryOp(lexer_->currentToken()) && getPrec(lexer_->currentToken()) >= prevPrec) {
+        Token op = consume();
+        int nextPrec = getPrec(op);
+        if (getAsc(op) == Associativity::LEFT_ASC) {
+            nextPrec++;
         }
-        second_operand = parse_expression(next_prec);
-        new_binop = mk_binop_node(op, first_operand, second_operand);
-        set_position(new_binop, op);
-        first_operand->set_parent(new_binop);
-        second_operand->set_parent(new_binop);
-        first_operand = new_binop;
+        secondOperand = parseExpression(nextPrec);
+        newBinop = mkBinopNode(op, firstOperand, secondOperand);
+        setPosition(newBinop, op);
+        firstOperand->setParent(newBinop);
+        secondOperand->setParent(newBinop);
+        firstOperand = newBinop;
     }
-    return first_operand;
+    return firstOperand;
 }
 
-//  Parse expression which includes parenthesised expressions,
-//  expressions with unary operators and compound identifiers.
-std::shared_ptr<expression> parser::parse_term() {
-    token curr = lexer_.currentToken();
-    if ( is_unary_op(curr) ) {
-        token op = consume();
-        int precedence = get_prec(op);
-        std::shared_ptr<expression> exp = parse_expression(precedence);
-        std::shared_ptr<expression> unop = mk_unop_node(op, exp);
-        set_position(unop, op);
-        exp->set_parent(unop);
+//  Parse Expression which includes parenthesised Expressions,
+//  Expressions with unary operators and compound identifiers.
+std::shared_ptr<Expression> Parser::parseTerm() {
+    Token curr = lexer_->currentToken();
+    if ( isUnaryOp(curr) ) {
+        Token op = consume();
+        int precedence = getPrec(op);
+        std::shared_ptr<Expression> exp = parseExpression(precedence);
+        std::shared_ptr<Expression> unop = mkUnopNode(op, exp);
+        setPosition(unop, op);
+        exp->setParent(unop);
         return unop;
-    } else if (curr.get_kind() == token_kind::LPAREN) {
-        consume(token_kind::LPAREN);
-        std::shared_ptr<expression> exp = parse_expression();
-        consume(token_kind::RPAREN);
+    } else if (curr.getKind() == TokenKind::LPAREN) {
+        consume(TokenKind::LPAREN);
+        std::shared_ptr<Expression> exp = parseExpression();
+        consume(TokenKind::RPAREN);
         return exp;
-    } else if (curr.get_type() == token_type::IDENTIFIER || curr.get_kind() == token_kind::THIS) {
-        return parse_compound_id();
-    } else if (is_constant_literal(curr)) {
-        token lit = consume();
-        literal_type lit_type = token_to_literal_type(lit);
-        auto lit_expr = std::make_shared<literal_expr>(lit.get_value(), lit_type);
-        set_position(lit_expr, lit);
-        return lit_expr;
+    } else if (curr.getType() == TokenType::IDENTIFIER || curr.getKind() == TokenKind::THIS) {
+        Token name = consume();
+        auto currentNode = std::make_shared<NameExpr>(name.getValue());
+        setPosition(currentNode, name);
+        return parseCompoundId(currentNode, name);
+    } else if (curr.getKind() == TokenKind::NEW_ARRAY) {
+        Token newArrayTok = curr;
+        auto newArrayNode = parseNewArray();
+        return parseCompoundId(newArrayNode, newArrayTok);
+    } else if (curr.getKind() == TokenKind::DELETE_ARRAY) {
+        Token deleteArrayTok = curr;
+        auto deleteArrayNode = parseDeleteArray();
+        return parseCompoundId(deleteArrayNode, deleteArrayTok);
+    } else if (isConstantLiteral(curr)) {
+        Token lit = consume();
+        Type* litType = tokenToLiteralType(lit);
+        auto litExpr = std::make_shared<LiteralExpr>(lit.getValue(), litType);
+        setPosition(litExpr, lit);
+        return litExpr;
     } else {
-        print_expected_err("Expected term expression",
-                           curr.get_line_pos(),
-                           curr.get_in_line_pos());
+        printExpectedErr("Expected term Expression",
+                           curr.getLinePos(),
+                           curr.getInLinePos());
         throw std::runtime_error("Parser error");
     }
     return nullptr;
+}
+
+std::shared_ptr<Expression> Parser::parseNewArray() {
+    Token newArrTok = consume(TokenKind::NEW_ARRAY);
+    consume(TokenKind::LPAREN);
+    Token tok = consume();
+    if ( !isType(tok) ) {
+        printExpectedErr("Expected type", 
+                           tok.getLinePos(),
+                           tok.getInLinePos());
+        throw std::runtime_error("Parser error");
+    }
+    consume(TokenKind::COMMA);
+    auto sizeExpr = parseExpression();
+    consume(TokenKind::RPAREN);
+    auto newArrExpr = std::make_shared<NewArrayExpr>(tokenToType(tok), sizeExpr);
+    setPosition(newArrExpr, newArrTok);
+    sizeExpr->setParent(newArrExpr);
+    return newArrExpr;
+}
+
+std::shared_ptr<Expression> Parser::parseDeleteArray() {
+    Token deleteArrTok = consume(TokenKind::DELETE_ARRAY);
+    consume(TokenKind::LPAREN);
+    auto sizeExpr = parseExpression();
+    consume(TokenKind::RPAREN);
+    auto deleteArrExpr = std::make_shared<DeleteArrayExpr>(sizeExpr);
+    setPosition(deleteArrExpr, deleteArrTok);
+    sizeExpr->setParent(deleteArrExpr);
+    return deleteArrExpr;
 }
 
 //  Parse compound identifiers which includes dot, square brackets, 
 //  function call operators.
 //  First identifier can be class name or this keyword
-std::shared_ptr<expression> parser::parse_compound_id() {
-    token id = consume();
-    token next_id;
-    std::shared_ptr<expression> new_node;
-    std::shared_ptr<expression> member_exp;
-    std::shared_ptr<expression_list> subrtn_args;
-    std::shared_ptr<expression> curr_node = std::make_shared<name_expr>(id.get_value());
-    set_position(curr_node, id);
+std::shared_ptr<Expression> Parser::parseCompoundId(
+        std::shared_ptr<Expression> currNode,
+        Token beginTok) {
+    Token nextId;
+    std::shared_ptr<Expression> newNode;
+    std::shared_ptr<Expression> memberExp;
+    std::shared_ptr<ExpressionList> subrtnArgs;
 
-    while (lexer_.hasTokens()) {
-        switch (lexer_.currentToken().get_kind()) {
-        case token_kind::DOT:
-            consume(token_kind::DOT);
-            next_id = consume(token_type::IDENTIFIER);
-            new_node = std::make_shared<member_expr>(curr_node, next_id.get_value());
+    while (lexer_->hasTokens()) {
+        switch (lexer_->currentToken().getKind()) {
+        case TokenKind::DOT:
+            consume(TokenKind::DOT);
+            nextId = consume(TokenType::IDENTIFIER);
+            newNode = std::make_shared<MemberExpr>(currNode, nextId.getValue());
             break;
 
-        case token_kind::LBRACK:
-            consume(token_kind::LBRACK);
-            member_exp = parse_expression();
-            consume(token_kind::RBRACK);
-            new_node = std::make_shared<array_member_expr>(curr_node, member_exp);
-            member_exp->set_parent(new_node);
+        case TokenKind::LBRACK:
+            consume(TokenKind::LBRACK);
+            memberExp = parseExpression();
+            consume(TokenKind::RBRACK);
+            newNode = std::make_shared<ArrayMemberExpr>(currNode, memberExp);
+            memberExp->setParent(newNode);
             break;
 
-        case token_kind::LPAREN:
-            next_id = consume(token_kind::LPAREN);
-            subrtn_args = parse_arg_list();
-            set_position(subrtn_args, next_id);
-            consume(token_kind::RPAREN);
-            new_node = std::make_shared<subroutine_call_expr>(curr_node, subrtn_args);
-            subrtn_args->set_parent(new_node);
+        case TokenKind::LPAREN:
+            nextId = consume(TokenKind::LPAREN);
+            subrtnArgs = parseArgList();
+            setPosition(subrtnArgs, nextId);
+            consume(TokenKind::RPAREN);
+            newNode = std::make_shared<SubroutineCallExpr>(currNode, subrtnArgs);
+            subrtnArgs->setParent(newNode);
             break;
 
         default:
-            return curr_node;
+            return currNode;
         }
 
-        set_position(new_node, id);
-        curr_node->set_parent(new_node);
-        curr_node = new_node;
+        setPosition(newNode, beginTok);
+        currNode->setParent(newNode);
+        currNode = newNode;
     }
     return nullptr;
 }
 
-std::shared_ptr<expression_list> parser::parse_arg_list() {
-    token arg_list_beg = lexer_.currentToken();
-    if (arg_list_beg.get_kind() == token_kind::RPAREN) {
-        return std::make_shared<expression_list>();
+std::shared_ptr<ExpressionList> Parser::parseArgList() {
+    Token argListBeg = lexer_->currentToken();
+    if (argListBeg.getKind() == TokenKind::RPAREN) {
+        return std::make_shared<ExpressionList>();
     }
-    std::shared_ptr<expression_list> arg_exprs = std::make_shared<expression_list>();
-    std::shared_ptr<expression> expr;
-    bool ended_stmt = false;
-    while (lexer_.hasTokens()) {
-        expr = parse_expression();
-        arg_exprs->add_expression(expr);
-        expr->set_parent(arg_exprs);
-        if (lexer_.currentToken().get_kind() == token_kind::RPAREN) {
-            ended_stmt = true;
+    std::shared_ptr<ExpressionList> argExprs = std::make_shared<ExpressionList>();
+    std::shared_ptr<Expression> expr;
+    bool endedStmt = false;
+    while (lexer_->hasTokens()) {
+        expr = parseExpression();
+        argExprs->addExpression(expr);
+        expr->setParent(argExprs);
+        if (lexer_->currentToken().getKind() == TokenKind::RPAREN) {
+            endedStmt = true;
             break;
         }
-        consume(token_kind::COMMA);
+        consume(TokenKind::COMMA);
     }
 
-    if (!ended_stmt) {
-        print_expected_err("Unexpected end of arguments list",
-                           arg_list_beg.get_line_pos(),
-                           arg_list_beg.get_in_line_pos());
+    if (!endedStmt) {
+        printExpectedErr("Unexpected end of arguments list",
+                           argListBeg.getLinePos(),
+                           argListBeg.getInLinePos());
         throw std::runtime_error("Parser error");
     }
 
-    return arg_exprs;
+    return argExprs;
 }
 
+Type* Parser::parseType() {
+    Token typeTok = consume();
+    if (!isType(typeTok)) {
+        printExpectedErr("Expected type", 
+                           typeTok.getLinePos(), 
+                           typeTok.getInLinePos());
+        throw std::runtime_error("Parser error");
+    }
+    Type* type = tokenToType(typeTok);
+    if (lexer_->currentToken().getKind() == TokenKind::LBRACK) {
+        consume(TokenKind::LBRACK);
+        consume(TokenKind::RBRACK);
+        type = ArrayType::getArrayTy(type);
+    }
+    return type;
+}
 
-std::shared_ptr<expression> parser::mk_unop_node(token op, 
-                                                 std::shared_ptr<expression> operand) {
-    op_type type;
-    switch (op.get_kind()) {
-    case token_kind::SUB:
-        type = op_type::NEG_OP;
+Type* Parser::parseReturnType() {
+    if (lexer_->currentToken().getKind() == TokenKind::VOID) {
+		consume();
+        return Type::getVoidTy();
+    }
+    return parseType();
+}
+
+std::shared_ptr<Expression> Parser::mkUnopNode(Token op, 
+                                                 std::shared_ptr<Expression> operand) {
+    OpType type;
+    switch (op.getKind()) {
+    case TokenKind::SUB:
+        type = OpType::NEG_OP;
         break;
-    case token_kind::TILDE:
-        type = op_type::TILDE_OP;
+    case TokenKind::TILDE:
+        type = OpType::TILDE_OP;
         break;
     default:
-        print_expected_err("Wrong unary operation",
-                           op.get_line_pos(),
-                           op.get_in_line_pos());
+        printExpectedErr("Wrong unary operation",
+                           op.getLinePos(),
+                           op.getInLinePos());
         throw std::runtime_error("Parser error");
     }
-    return std::make_shared<unop_expr>(operand, type);
+    return std::make_shared<UnopExpr>(operand, type);
 }
 
-std::shared_ptr<expression> parser::mk_binop_node(token op,
-                                                  std::shared_ptr<expression> first_operand,
-                                                  std::shared_ptr<expression> second_operand) {
-    op_type type;
-    switch (op.get_kind()) {
-    case token_kind::ADD:
-        type = op_type::ADD_OP;
+std::shared_ptr<Expression> Parser::mkBinopNode(Token op,
+                                                  std::shared_ptr<Expression> firstOperand,
+                                                  std::shared_ptr<Expression> secondOperand) {
+    OpType type;
+    switch (op.getKind()) {
+    case TokenKind::ADD:
+        type = OpType::ADD_OP;
         break;
-    case token_kind::SUB:
-        type = op_type::SUB_OP;
+    case TokenKind::SUB:
+        type = OpType::SUB_OP;
         break;
-    case token_kind::MUL:
-        type = op_type::MUL_OP;
+    case TokenKind::MUL:
+        type = OpType::MUL_OP;
         break;
-    case token_kind::QUO:
-        type = op_type::DIV_OP;
+    case TokenKind::QUO:
+        type = OpType::DIV_OP;
         break;
-    case token_kind::LOG_AND:
-        type = op_type::LOG_AND_OP;
+    case TokenKind::LOG_AND:
+        type = OpType::LOG_AND_OP;
         break;
-    case token_kind::LOG_OR:
-        type = op_type::LOG_OR_OP;
+    case TokenKind::LOG_OR:
+        type = OpType::LOG_OR_OP;
         break;
-    case token_kind::BIT_AND:
-        type = op_type::BIT_AND_OP;
+    case TokenKind::BIT_AND:
+        type = OpType::BIT_AND_OP;
         break;
-    case token_kind::LSS:
-        type = op_type::LSS_OP;
+    case TokenKind::LSS:
+        type = OpType::LSS_OP;
         break;
-    case token_kind::GTR:
-        type = op_type::GTR_OP;
+    case TokenKind::GTR:
+        type = OpType::GTR_OP;
         break;
-    case token_kind::EQL:
-        type = op_type::EQL_OP;
+    case TokenKind::EQL:
+        type = OpType::EQL_OP;
         break;
     default:
-        print_expected_err("Wrong binary operation",
-                           op.get_line_pos(),
-                           op.get_in_line_pos());
+        printExpectedErr("Wrong binary operation",
+                           op.getLinePos(),
+                           op.getInLinePos());
         throw std::runtime_error("Parser error");
     }
-    return std::make_shared<binop_expr>(first_operand, second_operand, type);
+    return std::make_shared<BinopExpr>(firstOperand, secondOperand, type);
 }
 
-token parser::consume(token_type type) {
-    token cur = lexer_.currentToken();
-    if (cur.get_type() == type) {
-        return lexer_.consume();
+std::shared_ptr<VariableDec> Parser::createVarDecWithMod(std::string name,
+                                                         Type* type,
+                                                         VarModifier mod) {
+    switch (mod) {
+    case VarModifier::ARG_V:
+        return std::make_shared<ArgumentVarDec>(name, type);
+    case VarModifier::FIELD_V:
+        return std::make_shared<FieldVarDec>(name, type);
+    case VarModifier::LOCAL_V:
+        return std::make_shared<LocalVarDec>(name, type);
+    case VarModifier::STATIC_V:
+        return std::make_shared<StaticVarDec>(name, type);
+    }
+    return nullptr;
+}
+
+Token Parser::consume(TokenType type) {
+    Token cur = lexer_->currentToken();
+    if (cur.getType() == type) {
+        return lexer_->consume();
     } else {
-        print_expected_err(type, cur.get_line_pos(), cur.get_in_line_pos());
+        printExpectedErr(type, cur.getLinePos(), cur.getInLinePos());
         throw std::runtime_error("Parser error");
     }
-    return token();
+    return Token();
 }
 
-token parser::consume(token_kind kind) {
-    token cur = lexer_.currentToken();
-    if (cur.get_kind() == kind) {    
-        return lexer_.consume();
+Token Parser::consume(TokenKind kind) {
+    Token cur = lexer_->currentToken();
+    if (cur.getKind() == kind) {    
+        return lexer_->consume();
     } else {
-        print_expected_err(kind, cur.get_line_pos(), cur.get_in_line_pos());
+        printExpectedErr(kind, cur.getLinePos(), cur.getInLinePos());
         throw std::runtime_error("Parser error");
     }
-    return token();
+    return Token();
 }
 
-token parser::consume() {
-    return lexer_.consume();
+Token Parser::consume() {
+    return lexer_->consume();
 }
 
-bool parser::is_class_var_dec(token tok) {
-    if (tok.get_kind() == token_kind::STATIC || tok.get_kind() == token_kind::FIELD) {
+bool Parser::isClassVarDec(Token tok) {
+    if (tok.getKind() == TokenKind::STATIC || tok.getKind() == TokenKind::FIELD) {
         return true;
     }
     return false;
 }
 
-bool parser::is_func_dec(token tok) {
-    if (tok.get_kind() == token_kind::CONSTRUCTOR ||
-        tok.get_kind() == token_kind::FUNCTION ||
-        tok.get_kind() == token_kind::METHOD) 
+bool Parser::isFuncDec(Token tok) {
+    if (tok.getKind() == TokenKind::CONSTRUCTOR ||
+        tok.getKind() == TokenKind::FUNCTION ||
+        tok.getKind() == TokenKind::METHOD) 
     {
         return true;
     }
     return false;
 }
 
-bool parser::is_type(token tok) {
-    if (tok.get_kind() == token_kind::INT || 
-        tok.get_kind() == token_kind::CHAR || 
-        tok.get_kind() == token_kind::BOOLEAN ||
-        tok.get_type() == token_type::IDENTIFIER) 
+bool Parser::isType(Token tok) {
+    if (tok.getKind() == TokenKind::INT || 
+        tok.getKind() == TokenKind::CHAR || 
+        tok.getKind() == TokenKind::BOOLEAN ||
+        tok.getType() == TokenType::IDENTIFIER) 
     {
         return true;
     }
     return false;
 }
 
-bool parser::is_constant_literal(token tok) {
-    if (tok.get_type() == token_type::STR_LITERAL || 
-        tok.get_type() == token_type::INT_LITERAL ||
-        tok.get_kind() == token_kind::TRUE ||
-        tok.get_kind() == token_kind::FALSE ||
-        tok.get_kind() == token_kind::NULL_KEYWORD )
+bool Parser::isConstantLiteral(Token tok) {
+    if (tok.getType() == TokenType::STR_LITERAL ||
+        tok.getType() == TokenType::CHAR_LITERAL || 
+        tok.getType() == TokenType::INT_LITERAL ||
+        tok.getKind() == TokenKind::TRUE ||
+        tok.getKind() == TokenKind::FALSE ||
+        tok.getKind() == TokenKind::NULL_KEYWORD )
     {
         return true;
     }
     return false;
 }
 
-bool parser::is_unary_op(token tok) {
-    if (tok.get_kind() == token_kind::TILDE || tok.get_kind() == token_kind::SUB) {
+bool Parser::isUnaryOp(Token tok) {
+    if (tok.getKind() == TokenKind::TILDE || tok.getKind() == TokenKind::SUB) {
         return true;
     }
     return false;
 }
 
-bool parser::is_binary_op(token tok) {
-    if (token_kind::binop_beg < tok.get_kind() && tok.get_kind() < token_kind::binop_end) {
+bool Parser::isBinaryOp(Token tok) {
+    if (TokenKind::binopBeg < tok.getKind() && tok.getKind() < TokenKind::binopEnd) {
         return true;
     }
     return false;
 }
 
-void parser::set_position(std::shared_ptr<node> node, token tok) {
-    node->set_line_pos(tok.get_line_pos());
-    node->set_in_line_pos(tok.get_in_line_pos());
+void Parser::setPosition(std::shared_ptr<Node> node, Token tok) {
+    node->setLinePos(tok.getLinePos());
+    node->setInLinePos(tok.getInLinePos());
 }
 
-int parser::get_prec(token tok) {
-    return op_info_.find(tok.get_value())->second.first;
+int Parser::getPrec(Token tok) {
+    return opInfo_.find(tok.getValue())->second.first;
 }
 
-associativity parser::get_asc(token tok) {
-    return op_info_.find(tok.get_value())->second.second;
+Associativity Parser::getAsc(Token tok) {
+    return opInfo_.find(tok.getValue())->second.second;
 }
 
-std::string parser::token_to_var_type(token type_tok) {
-    if (type_tok.get_type() == token_type::KEYWORD) {
-        switch (type_tok.get_kind()) {
-        case token_kind::INT:
-            return "int";
-        case token_kind::CHAR:
-            return "char";
-        case token_kind::BOOLEAN:
-            return "boolean";
-        case token_kind::VOID:
-            return "void";
+Type* Parser::tokenToType(Token typeTok) {
+    if (typeTok.getType() == TokenType::KEYWORD) {
+        switch (typeTok.getKind()) {
+        case TokenKind::INT:
+            return Type::getIntTy();
+        case TokenKind::CHAR:
+            return Type::getCharTy();
+        case TokenKind::BOOLEAN:
+            return Type::getBoolTy();
+        case TokenKind::VOID:
+            return Type::getVoidTy();
         default:
-            print_expected_err("Wrong type token",
-                               type_tok.get_line_pos(),
-                               type_tok.get_in_line_pos());
+            printExpectedErr("Wrong type Token",
+                               typeTok.getLinePos(),
+                               typeTok.getInLinePos());
             throw std::runtime_error("Parser error");
         }
     }
-    return type_tok.get_value();
+    return ClassType::getClassTy(typeTok.getValue());
 }
 
-var_modifier parser::token_to_var_modifier(token mod_tok) {
-    var_modifier mod;
-    switch (mod_tok.get_kind()) {
-    case token_kind::STATIC:
-        mod = var_modifier::STATIC_V;
-    case token_kind::FIELD:
-        mod = var_modifier::FIELD_V;
-    case token_kind::VAR:
-        mod = var_modifier::LOCAL_V;
-    }
+VarModifier Parser::tokenToVarModifier(Token modTok) {
+    VarModifier mod;
+    switch (modTok.getKind()) {
+    case TokenKind::STATIC:
+        mod = VarModifier::STATIC_V;
+		break;
+    case TokenKind::FIELD:
+        mod = VarModifier::FIELD_V;
+		break;
+	case TokenKind::VAR:
+        mod = VarModifier::LOCAL_V;
+		break;
+	}
     return mod;
 }
 
-subroutine_kind parser::token_to_subroutine_kind(token type_tok) {
-    subroutine_kind sub_type;
-    switch (type_tok.get_kind()) {
-    case token_kind::METHOD:
-        sub_type = subroutine_kind::METHOD_S;
-    case token_kind::CONSTRUCTOR:
-        sub_type = subroutine_kind::CONSTRUCTOR_S;
-    case token_kind::FUNCTION:
-        sub_type = subroutine_kind::FUNCTION_S;
+SubroutineKind Parser::tokenToSubroutineKind(Token typeTok) {
+    SubroutineKind subType;
+    switch (typeTok.getKind()) {
+    case TokenKind::METHOD:
+        subType = SubroutineKind::METHOD_S;
+    case TokenKind::CONSTRUCTOR:
+        subType = SubroutineKind::CONSTRUCTOR_S;
+    case TokenKind::FUNCTION:
+        subType = SubroutineKind::FUNCTION_S;
     }
-    return sub_type;
+    return subType;
 }
 
-literal_type parser::token_to_literal_type(token kind_tok) {
-    literal_type lit_kind;
-    switch(kind_tok.get_kind()) {
-    case token_kind::TRUE:
-        lit_kind = literal_type::TRUE_LITERAL;
+Type* Parser::tokenToLiteralType(Token kindTok) {
+    Type* litType;
+    switch(kindTok.getKind()) {
+    case TokenKind::TRUE:
+    case TokenKind::FALSE:
+        litType = Type::getBoolTy();
         break;
-    case token_kind::FALSE:
-        lit_kind = literal_type::FALSE_LITERAL;
-        break;
-    case token_kind::NULL_KEYWORD:
-        lit_kind = literal_type::NULL_LITERAL;
+    case TokenKind::NULL_KEYWORD:
+        litType = Type::getNullTy();
         break;
     }
 
-    switch (kind_tok.get_type()) {
-    case token_type::INT_LITERAL:
-        lit_kind = literal_type::INT_LITERAL;
+    switch (kindTok.getType()) {
+    case TokenType::INT_LITERAL:
+        litType = Type::getIntTy();
         break;
-    case token_type::STR_LITERAL:
-        lit_kind = literal_type::STR_LITERAL;
+    case TokenType::STR_LITERAL:
+        litType = Type::getCharTy();
+        litType = ArrayType::getArrayTy(litType);
+        break;
+    case TokenType::CHAR_LITERAL:
+        litType = Type::getCharTy();
         break;
     }
-    return lit_kind;
+    return litType;
 }
 
-void parser::print_expected_err(token_kind kind, unsigned line_pos, unsigned in_line_pos) {
-    auto it = std::find_if(token::keywords.begin(), 
-                           token::keywords.end(), 
+void Parser::printExpectedErr(TokenKind kind, unsigned linePos, unsigned inLinePos) {
+    auto it = std::find_if(Token::keywords.begin(), 
+                           Token::keywords.end(), 
                            [kind](const auto& p) { return p.second == kind; });
     std::cerr << "Expected \"" << it->first << "\" on line: " <<
-                    line_pos << ":" << in_line_pos << std::endl;
+                    linePos << ":" << inLinePos << std::endl;
 }
 
-void parser::print_expected_err(token_type type, unsigned line_pos, unsigned in_line_pos) {
+void Parser::printExpectedErr(TokenType type, unsigned linePos, unsigned inLinePos) {
     std::string expected;
     switch (type) {
-    case token_type::IDENTIFIER:
+    case TokenType::IDENTIFIER:
         expected = "Identifier";
         break;
-    case token_type::INT_LITERAL:
+    case TokenType::INT_LITERAL:
         expected = "Integer literal";
         break;
-    case token_type::STR_LITERAL:
+    case TokenType::STR_LITERAL:
         expected = "String literal";
         break;
-    case token_type::KEYWORD:
+    case TokenType::KEYWORD:
         expected = "Keyword";
         break;
-    case token_type::SYMBOL:
+    case TokenType::SYMBOL:
         expected = "Symbol";
         break;
     }
-    std::cerr << "Expected \"" << expected << " token\" on line: " <<
-                    line_pos << ":" << in_line_pos << std::endl;
+    std::cerr << "Expected \"" << expected << " Token\" on line: " <<
+                    linePos << ":" << inLinePos << std::endl;
 }
 
-void parser::print_expected_err(const char *err, unsigned line_pos, unsigned in_line_pos) {
+void Parser::printExpectedErr(const char *err, unsigned linePos, unsigned inLinePos) {
     std::cerr << err << " on line "
-              << line_pos << ":" << in_line_pos << std::endl;
+              << linePos << ":" << inLinePos << std::endl;
 }

@@ -5,30 +5,57 @@
 #include <iterator>
 #include <exception>
 #include <algorithm>
-#include "token.hpp"
+#include "Token.hpp"
 
-class lexer {
+class Lexer final {
 public:
-    lexer(std::string sourceText) 
+    Lexer(std::string sourceText) 
         : sourceText_(sourceText), 
           iter_(sourceText_.begin()),
           endIter_(sourceText_.end())
     {
         skipSpacesAndComments();
-        currentToken_ = get_token();
+        currentToken_ = getToken();
     }
 
-    token get_token() {
+    Token consume() {
+        Token tmp = getToken();
+        std::swap(currentToken_, tmp);
+        return tmp;
+    }
+
+    Token currentToken() {
+        return currentToken_;
+    }
+
+    void printTokens() {
+        while (hasTokens()) {
+            Token tok = consume();
+            if (tok.getType() == TokenType::EMPTY_TOKEN) return;
+            std::cout << tok.getValue() << std::endl;
+            std::cout << "Token line " <<  tok.getLinePos() << std::endl;
+            std::cout << "Token in line " << tok.getInLinePos() << std::endl;
+        }
+    }
+
+    bool hasTokens() {
+        return currentToken_.getType() != TokenType::TEOF;
+    }
+
+private:
+    Token getToken() {
         if (iter_ == endIter_) {
-            return token(token_type::T_EOF, token_kind::NOT_KEYWORD, "");
+            return Token(TokenType::TEOF, TokenKind::NOT_KEYWORD, "");
         }
 
-        unsigned token_line_pos = current_line_pos_;
-        unsigned token_in_line_pos = current_in_line_pos_;
-        token tok;
+        unsigned tokenLinePos = currentLinePos_;
+        unsigned tokenInLinePos = currentInLinePos_;
+        Token tok;
         char currentChar = *iter_;
         if (currentChar == '\"') {
             tok = consumeStrLiteral();
+        } else if (currentChar == '\'') {
+            tok = consumeCharLiteral();
         } else if (std::isdigit(currentChar)) {
             tok = consumeNumberLiteral();
         } else if (isSymbol(std::string{currentChar})) {
@@ -36,46 +63,21 @@ public:
         } else {
             std::string word = consumeWord();
             if (word.empty()) {
-                std::cerr << "Unexpected token on line " <<
-                             current_line_pos_ << ":" << current_in_line_pos_;
+                std::cerr << "Unexpected Token on line " <<
+                             currentLinePos_ << ":" << currentInLinePos_;
                 throw std::runtime_error("Lexer error");
             } else if (isKeyword(word)) {
-                tok = token(token_type::KEYWORD, getKeywordSymbol(word), word);
+                tok = Token(TokenType::KEYWORD, getKeywordSymbol(word), word);
             } else if (isIdentifier(word)) {
-                tok = token(token_type::IDENTIFIER, token_kind::NOT_KEYWORD, word);
+                tok = Token(TokenType::IDENTIFIER, TokenKind::NOT_KEYWORD, word);
             }
         }
         skipSpacesAndComments();
-        tok.set_line_pos(token_line_pos);
-        tok.set_in_line_pos(token_in_line_pos);
+        tok.setLinePos(tokenLinePos);
+        tok.setInLinePos(tokenInLinePos);
         return tok;
     }
 
-    token consume() {
-        token tmp = get_token();
-        std::swap(currentToken_, tmp);
-        return tmp;
-    }
-
-    token currentToken() {
-        return currentToken_;
-    }
-
-    void printTokens() {
-        while (hasTokens()) {
-            token tok = consume();
-            if (tok.get_type() == token_type::EMPTY_TOKEN) return;
-            std::cout << tok.get_value() << std::endl;
-            std::cout << "Token line " <<  tok.get_line_pos() << std::endl;
-            std::cout << "Token in line " << tok.get_in_line_pos() << std::endl;
-        }
-    }
-
-    bool hasTokens() {
-        return currentToken_.get_type() != token_type::T_EOF;
-    }
-
-private:
     void skipSpacesAndComments() {
         while (iter_ != endIter_) {
             if (std::isspace(*iter_)) {
@@ -119,14 +121,14 @@ private:
     std::string::iterator consumeChar() {
         switch (*iter_) {
             case '\n': 
-                current_line_pos_++;
-                current_in_line_pos_ = 1;
+                currentLinePos_++;
+                currentInLinePos_ = 1;
                 break;
             case '\t':
-                current_in_line_pos_ += 4;
+                currentInLinePos_ += 4;
                 break;
             default:
-                current_in_line_pos_++;
+                currentInLinePos_++;
                 break;
         }
         
@@ -135,29 +137,29 @@ private:
 
     std::string::iterator putbackChar() {
         --iter_;
-        current_in_line_pos_--;
+        currentInLinePos_--;
         return iter_;
     }
 
-    token consumeSymbol() {
-        char next_char = 0;
+    Token consumeSymbol() {
+        char nextChar = 0;
         char currentChar = *iter_;
         consumeChar();
         if (iter_ != endIter_) {
-            next_char = *iter_;
+            nextChar = *iter_;
         }
 
-        std::string maybeDoubleCharSym = {currentChar, next_char};
-        auto keyword_iter = token::keywords.find(maybeDoubleCharSym);
+        std::string maybeDoubleCharSym = {currentChar, nextChar};
+        auto keywordIter = Token::keywords.find(maybeDoubleCharSym);
         std::string finSymbol;
-        if (keyword_iter != token::keywords.end()) {
+        if (keywordIter != Token::keywords.end()) {
             consumeChar();
             finSymbol = maybeDoubleCharSym;
         } else {
             finSymbol = std::string{currentChar};
-            keyword_iter = token::keywords.find(finSymbol);
+            keywordIter = Token::keywords.find(finSymbol);
         }
-        return token(token_type::SYMBOL, keyword_iter->second, finSymbol);;
+        return Token(TokenType::SYMBOL, keywordIter->second, finSymbol);
     }
 
     std::string consumeWord() {
@@ -169,9 +171,34 @@ private:
         return word;
     }
 
-    token consumeStrLiteral() {
-        unsigned begin_line_pos = current_line_pos_;
-        unsigned begin_in_line_pos = current_in_line_pos_;
+    Token consumeCharLiteral() {
+        unsigned beginLinePos = currentLinePos_;
+        unsigned beginInLinePos = currentInLinePos_;
+        consumeChar();
+        char charLiteral = 0;
+		if (iter_ != endIter_) {
+			charLiteral = *iter_;
+			consumeChar();
+		} else {
+			std::cerr << "Missing terminating \' character\n"
+				"Initial \" character on line " <<
+				beginLinePos << ":" << beginInLinePos;
+			throw std::runtime_error("Lexer error");
+		}
+
+        if (iter_ == endIter_ || *iter_ != '\'') {
+            std::cerr << "Missing terminating \' character\n"
+                         "Initial \" character on line " <<
+                          beginLinePos << ":" << beginInLinePos;
+            throw std::runtime_error("Lexer error");
+        }
+        consumeChar();
+        return Token(TokenType::CHAR_LITERAL, TokenKind::NOT_KEYWORD, std::string{charLiteral});
+    }
+
+    Token consumeStrLiteral() {
+        unsigned beginLinePos = currentLinePos_;
+        unsigned beginInLinePos = currentInLinePos_;
         consumeChar();
         std::string strLiteral;
         while(iter_ != endIter_ && *iter_ != '\"') {
@@ -181,31 +208,31 @@ private:
         if (iter_ == endIter_) {
             std::cerr << "Missing terminating \" character\n"
                          "Initial \" character on line " <<
-                          begin_line_pos << ":" << begin_in_line_pos;
+                          beginLinePos << ":" << beginInLinePos;
             throw std::runtime_error("Lexer error");
         }
         consumeChar();
 
-        return token(token_type::STR_LITERAL, token_kind::NOT_KEYWORD, strLiteral);
+        return Token(TokenType::STR_LITERAL, TokenKind::NOT_KEYWORD, strLiteral);
     }
 
-    token consumeNumberLiteral() {
+    Token consumeNumberLiteral() {
         std::string num;
         while (iter_ != endIter_ && std::isdigit(*iter_)) {
             num += *iter_;
             consumeChar();
         }
 
-        return token(token_type::INT_LITERAL, token_kind::NOT_KEYWORD, num);
+        return Token(TokenType::INT_LITERAL, TokenKind::NOT_KEYWORD, num);
     }
 
     /*
     Lexer utility function definitions
     */
     bool isSymbol(const std::string &lexem) {
-        auto keyword = token::keywords.find(lexem);
-        if (keyword != token::keywords.end() &&
-            token_kind::symbol_beg < keyword->second && keyword->second < token_kind::symbol_end) 
+        auto keyword = Token::keywords.find(lexem);
+        if (keyword != Token::keywords.end() &&
+            TokenKind::symbolBeg < keyword->second && keyword->second < TokenKind::symbolEnd) 
         {    
             return true;
         } else {
@@ -214,9 +241,9 @@ private:
     }
 
     bool isKeyword(const std::string &lexem) {
-        auto keyword_iter = token::keywords.find(lexem);
-        if (keyword_iter != token::keywords.end() && 
-            token_kind::keyword_beg < keyword_iter->second && keyword_iter->second < token_kind::keyword_end) 
+        auto keywordIter = Token::keywords.find(lexem);
+        if (keywordIter != Token::keywords.end() && 
+            TokenKind::keywordBeg < keywordIter->second && keywordIter->second < TokenKind::keywordEnd) 
         {
             return true;
         }
@@ -246,8 +273,8 @@ private:
         return true;
     }
 
-    token_kind getKeywordSymbol(const std::string &lexem) {
-        token_kind type = token::keywords.find(lexem)->second;
+    TokenKind getKeywordSymbol(const std::string &lexem) {
+        TokenKind type = Token::keywords.find(lexem)->second;
         return type;
     }
 
@@ -255,7 +282,7 @@ private:
     std::string sourceText_;
     std::string::iterator iter_;
     std::string::iterator endIter_;
-    token currentToken_;
-    unsigned int current_line_pos_ = 1;
-    unsigned int current_in_line_pos_ = 1;
+    Token currentToken_;
+    unsigned int currentLinePos_ = 1;
+    unsigned int currentInLinePos_ = 1;
 };

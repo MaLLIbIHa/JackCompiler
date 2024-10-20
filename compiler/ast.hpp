@@ -3,8 +3,16 @@
 #include <memory>
 #include <string>
 #include <iostream>
-#include "visitor.hpp"
-#include "node_descriptors.hpp"
+#include "Type.hpp"
+#include "SourceLocation.hpp"
+#include "Visitor.hpp"
+#include "NodeDescriptors.hpp"
+
+enum class ValueCategory {
+	NOT_VALUE,
+	LVALUE,
+	RVALUE,
+};
 
 /*
 -------------------------------
@@ -12,127 +20,168 @@ Jack program structure
 -------------------------------
 */
 
-class node {
+class Node {
 public:
-    node() = default;
-    node(std::shared_ptr<node> parent_node,
-         unsigned int in_line_pos,
-         unsigned int line_pos
+    Node(SourceLocation sourceLoc) : sourceLoc_(std::move(sourceLoc)) {}
+    
+    Node(Node* parentNode,
+         SourceLocation sourceLoc
         )
-        : parent_node_(parent_node),
-          in_line_pos_(in_line_pos),
-          line_pos_(line_pos)
+        : parentNode_(parentNode),
+          sourceLoc_(std::move(sourceLoc))
         {}
 
-    virtual ~node() = default;
+    virtual ~Node() = default;
 
-    virtual unsigned int children() = 0;
+    virtual NodeType getNodeType() const = 0;
 
-    virtual std::shared_ptr<node> child(unsigned int i) = 0;
-    
-    virtual node_type get_type() = 0;
-    
-    std::shared_ptr<node> get_parent() { return parent_node_; }
-    
-    void set_parent(std::shared_ptr<node> parent_node) {
-        parent_node_ = parent_node;
-    }
+    void setParent(Node* parent) { parentNode_ = parent; }
 
-    void set_line_pos(unsigned int line_pos) { line_pos_ = line_pos; }
+    Node* getParent() { return parentNode_; }
 
-    void set_in_line_pos(unsigned int in_line_pos) { in_line_pos_ = in_line_pos; }
+    const SourceLocation& getSourceLoc() const { return sourceLoc_; }
 
-    unsigned int get_in_line_pos() { return in_line_pos_; }
+    virtual void accept(Visitor &) = 0;
 
-    unsigned int get_line_pos() { return line_pos_; } 
+    virtual Node* child(unsigned index) = 0;
 
-    virtual void accept(visitor &) = 0;
-    
+    virtual unsigned children() const = 0;
+
 private:
-    std::shared_ptr<node> parent_node_;
-    unsigned int line_pos_ = 0;
-    unsigned int in_line_pos_ = 0;
+    Node* parentNode_;
+    SourceLocation sourceLoc_;
 };
 
-class statement : public node {};
+class Statement : public Node {
+protected:
+    Statement(Node* parentNode, SourceLocation sourceLoc) 
+        : Node(parentNode, sourceLoc) {}
+};
 
-class expression : public node {};
+class Expression : public Node {
+protected:
+    Expression(Node* parentNode,
+               SourceLocation sourceLoc, 
+               Type* type, ValueCategory valCategory)
+        : Node(parentNode, std::move(sourceLoc)), 
+          evalType_(type), 
+          valCategory_(valCategory) {}
+
+    ValueCategory getValueCat() const { return valCategory_; }
+
+    Type* getEvalType() const { return evalType_; }
+
+    Type* evalType_;
+    ValueCategory valCategory_;
+};
 
 
 /*
-Variable class represents variable name and type 
+Variable class represents variable name and type
 */
-class variable_dec : public node {
+class VariableDec : public Node {
 public:
-    variable_dec() = default;
+    VariableDec(Node* parent,
+                SourceLocation sourceLoc,
+                std::string name,
+                Type* type)
+            : Node(parent, std::move(sourceLoc)),
+              name_(std::move(name)),
+              type_(type)
+            {}
 
-    variable_dec(std::string name,
-                 std::string type,
-                 var_modifier mod
-                )
-                : name_(name),
-                  type_(type),
-                  kind_(mod) 
-                {}
+    virtual NodeType getNodeType() const = 0;
+    
+    void setVarName(std::string name) { name_ = std::move(name); }
 
-    void set_name(std::string &name) { name_ = name; }
+    void setVarType(Type* type) { type_ = type; }
 
-    void set_type(std::string &type) { type_ = type; }
+    std::string getVarName() const { return name_; }
 
-    void set_type(var_modifier mod) { kind_ = mod; }
+    Type* getVarType() const { return type_; }
 
-    std::string get_var_type() { return type_; }
+    unsigned int children() const override { return 0; }
 
-    std::string get_var_name() { return name_; }
+    Node* child(unsigned int i) override { return nullptr; }
 
-    var_modifier get_var_kind() { return kind_; }
-
-    node_type get_type() override { return node_type::VAR_DEC; }
-
-    unsigned int children() override { return 0; }
-
-    std::shared_ptr<node> child(unsigned int i) override { return nullptr; }
-
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        vstr.postVisit(this);
     }
     
 private:
     std::string name_;
-    std::string type_;
-    var_modifier kind_;
+    Type* type_;
 };
 
-
-class variable_dec_list : public node {
+class FieldVarDec final : public VariableDec {
 public:
-    variable_dec_list() = default;
+    NodeType getNodeType() const override { return NodeType::FIELD_VAR_DEC; }
+};
 
-    void add_var(std::shared_ptr<variable_dec> var_dec) {
-        vars_.push_back(var_dec);
+class StaticVarDec final : public VariableDec {
+public:
+    NodeType getNodeType() const override { return NodeType::STATIC_VAR_DEC; }
+};
+
+class ArgumentVarDec final : public VariableDec {
+public:
+    NodeType getNodeType() const override { return NodeType::ARGUMENT_VAR_DEC; }
+};
+
+class LocalVarDec final : public VariableDec {
+public:
+    NodeType getNodeType() const override { return NodeType::LOCAL_VAR_DEC; }
+};
+
+#if 0
+class VariableDecList : public Node {
+public:
+    VariableDecList() = default;
+
+    void addVar(VariableDec* varDec) {
+        vars_.push_back(varDec);
     }
 
-    node_type get_type() override { return node_type::VAR_DEC_LIST; }
+    virtual NodeType getNodeType() const = 0;
 
-    unsigned int children() override { return vars_.size(); }
+    unsigned int children() const override { return vars_.size(); }
 
-    std::shared_ptr<node> child(unsigned int i) override {
+    Node* child(unsigned int i) override {
         if (i >= vars_.size()) return nullptr;
         return vars_[i];
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
         for (auto&& var : vars_) {
             var->accept(vstr);
         }
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
     
 private:
-    std::vector<std::shared_ptr<variable_dec>> vars_;
+    std::vector<VariableDec*> vars_;
 };
+
+class FieldVariableList final : public VariableDecList {
+public:
+    NodeType getNodeType() const override { return NodeType::FIELD_VAR_DEC_LIST; }
+};
+
+class StaticVariableList final : public VariableDecList {
+public:
+    NodeType getNodeType() const override { return NodeType::STATIC_VAR_DEC_LIST; }
+};
+
+class SubroutineArgumentList final : public VariableDecList {
+    NodeType getNodeType() const override { return NodeType::ARGUMENT_VAR_DEC_LIST; }
+};
+
+class LocalVariableList final : public VariableDecList {
+    NodeType getNodeType() const override { return NodeType::LOCAL_VAR_DEC_LIST; }
+};
+#endif
 
 /*
 -------------------------------
@@ -140,203 +189,241 @@ Statements
 -------------------------------
 */
 
-class statement_list : public node {
+class StatementList : public Node {
 public:
-    statement_list() = default;
+    StatementList(Node* parent, SourceLocation sourceLoc,
+                  std::vector<Statement*> statements)
+        : Node(parent, sourceLoc), 
+          statementList_(std::move(statements)) {}
 
-    void add_statement(std::shared_ptr<statement> stmt) {
-        statement_list_.push_back(stmt);
+    void addStatement(Statement* stmt) {
+        statementList_.push_back(stmt);
     }
 
-    node_type get_type() override { return node_type::STATEMENT_LIST; }
+    NodeType getNodeType() const override { return NodeType::STATEMENT_LIST; }
 
-    unsigned int children() override { return statement_list_.size(); }
+    std::vector<Statement*>::iterator
+    statementListBegin() { return statementList_.begin(); }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i >= statement_list_.size()) return nullptr;
-        return statement_list_[i];
+    std::vector<Statement*>::iterator
+    StatementListEnd() { return statementList_.end(); }
+
+    unsigned int children() const override { return statementList_.size(); }
+
+    Node* child(unsigned int i) override {
+        if (i >= statementList_.size()) return nullptr;
+        return statementList_[i];
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        for (auto&& stmt : statement_list_) {
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        for (auto&& stmt : statementList_) {
             stmt->accept(vstr);
         }
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
 
 private:
-    std::vector<std::shared_ptr<statement>> statement_list_;
+    std::vector<Statement*> statementList_;
 };
 
-class let_statement : public statement {
+class LetStatement : public Statement {
 public:
-    let_statement() = default;
+    LetStatement(Node* parent, SourceLocation sourceLoc,
+                 Expression* lhs, Expression* rhs) 
+        : Statement(parent, sourceLoc), lhsExpr_(lhs), rhsExpr_(rhs) {}
 
-    void add_lhs(std::shared_ptr<expression> lhs) {
-        lhs_expr_ = lhs;
-    }
+    void addLhs(Expression* lhs) { lhsExpr_ = lhs; }
 
-    void add_rhs(std::shared_ptr<expression> rhs) {
-        rhs_expr_ = rhs;
-    }
+    void addRhs(Expression* rhs) { rhsExpr_ = rhs; }
+
+    Expression* getLhsExpr() { return lhsExpr_; }
+
+    Expression* getRhsExpr() { return rhsExpr_; }
     
-    node_type get_type() override { return node_type::LET_STATEMENT; }
+    NodeType getNodeType() const override { return NodeType::LET_STATEMENT; }
 
-    unsigned int children() override { return 2; }
+    unsigned int children() const override { return 2; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return lhs_expr_;
-        if (i == 1) return rhs_expr_;
+    Node* child(unsigned int i) override {
+        if (i == 0) return lhsExpr_;
+        if (i == 1) return rhsExpr_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        lhs_expr_->accept(vstr);
-        rhs_expr_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        lhsExpr_->accept(vstr);
+        rhsExpr_->accept(vstr);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<expression> lhs_expr_;
-    std::shared_ptr<expression> rhs_expr_;
+    Expression* lhsExpr_;
+    Expression* rhsExpr_;
 };
 
-class if_statement : public statement {
+class IfStatement : public Statement {
 public:
-    if_statement() = default;
+    IfStatement(Node* parent, SourceLocation sourceLoc,
+                Expression* condition,
+                StatementList* ifBody,
+                StatementList* elseBody)
+        : Statement(parent, sourceLoc), condition_(condition),
+          ifBody_(ifBody), elseBody_(elseBody) {}
 
-    void add_condition(std::shared_ptr<expression> condition) {
+    void addCondition(Expression* condition) {
         condition_ = condition;    
     }
     
-    void add_if_body(std::shared_ptr<statement_list> if_body) {
-        if_body_ = if_body;
+    void addIfBody(StatementList* ifBody) {
+        ifBody_ = ifBody;
     }
 
-    void add_else_body(std::shared_ptr<statement_list> else_body) {
-        else_body_ = else_body;
+    void addElseBody(StatementList* elseBody) {
+        elseBody_ = elseBody;
     }
 
-    node_type get_type() override { return node_type::IF_STATEMENT; }
+    Expression* getConditionExpr() { return condition_; }
+
+    StatementList* getIfBody() { return ifBody_; }
+
+    StatementList* getElseBody() { return elseBody_; }
+
+    NodeType getNodeType() const override { return NodeType::IF_STATEMENT; }
     
-    unsigned int children() override { return 3; }
+    unsigned int children() const override { return 3; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
+    Node* child(unsigned int i) override {
         if (i == 0) return condition_;
-        if (i == 1) return if_body_;
-        if (i == 2) return else_body_;
+        if (i == 1) return ifBody_;
+        if (i == 2) return elseBody_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
         condition_->accept(vstr);
-        if_body_->accept(vstr);
-        if (else_body_) {
-            else_body_->accept(vstr);
+        ifBody_->accept(vstr);
+        if (elseBody_) {
+            elseBody_->accept(vstr);
         }
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<expression> condition_;
-    std::shared_ptr<statement_list> if_body_;
-    std::shared_ptr<statement_list> else_body_;
+    Expression* condition_;
+    StatementList* ifBody_;
+    StatementList* elseBody_;
 };
 
-class while_statement : public statement {
+class WhileStatement : public Statement {
 public:
-    while_statement() = default;
+    WhileStatement(Node* parent, SourceLocation sourceLoc,
+                   Expression* condition,
+                   StatementList* body)
+        : Statement(parent, sourceLoc), condition_(condition),
+          body_(body) {}
     
-    void add_condition(std::shared_ptr<expression> condition) {
+    void addCondition(Expression* condition) {
         condition_ = condition;
     }
 
-    void add_body(std::shared_ptr<statement_list> body) {
+    void addBody(StatementList* body) {
         body_ = body;
     }
 
-    node_type get_type() override { return node_type::WHILE_STATEMENT; }
+    Expression* getConditionExpr() { return condition_; }
 
-    unsigned int children() override { return 3; }
+    StatementList* getBody() { return body_; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
+    NodeType getNodeType() const override { return NodeType::WHILE_STATEMENT; }
+
+    unsigned int children() const override { return 3; }
+
+    Node* child(unsigned int i) override {
         if (i == 0) return condition_;
         if (i == 1) return body_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
         condition_->accept(vstr);
         body_->accept(vstr);
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<expression> condition_;
-    std::shared_ptr<statement_list> body_;
+    Expression* condition_;
+    StatementList* body_;
 };
 
-class do_statement : public statement {
+class DoStatement : public Statement {
 public:
-    do_statement() = default;
+    DoStatement(Node* parent, SourceLocation sourceLoc,
+                Expression* callExpr)
+        : Statement(parent, sourceLoc), callExpr_(callExpr) {}
 
-    void add_call_expr(std::shared_ptr<expression> call_expr) {
-        call_expr_ = call_expr;
+    void addCallExpr(Expression* callExpr) {
+        callExpr_ = callExpr;
     }
 
-    node_type get_type() override { return node_type::DO_STATEMENT; }
+    Expression* getCallExpr() { return callExpr_; }
 
-    unsigned int children() override { return 1; }
+    NodeType getNodeType() const override { return NodeType::DO_STATEMENT; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return call_expr_;
+    unsigned int children() const override { return 1; }
+
+    Node* child(unsigned int i) override {
+        if (i == 0) return callExpr_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        call_expr_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        callExpr_->accept(vstr);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<expression> call_expr_;
+    Expression* callExpr_;
 };
 
-class return_statement : public statement {
+class ReturnStatement : public Statement {
 public:
-    return_statement() = default;
+    ReturnStatement(Node* parent, SourceLocation sourceLoc,
+                    Expression* callExpr)
+        : Statement(parent, sourceLoc), retExpr_(callExpr) {}
 
-    void add_ret_expr(std::shared_ptr<expression> ret_expr) {
-        ret_expr_ = ret_expr;
+    void addRetExpr(Expression* retExpr) {
+        retExpr_ = retExpr;
     }
 
-    node_type get_type() override { return node_type::RETURN_STATEMENT; }
+    Expression* getReturnExpr() { return retExpr_; }
 
-    unsigned int children() override {
-        if (ret_expr_ != nullptr) return 1;
+    NodeType getNodeType() const override { return NodeType::RETURN_STATEMENT; }
+
+    unsigned int children() const override {
+        if (retExpr_ != nullptr) return 1;
         return 0;
     }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return ret_expr_;
+    Node* child(unsigned int i) override {
+        if (i == 0) return retExpr_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        if (ret_expr_) {
-            ret_expr_->accept(vstr);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        if (retExpr_) {
+            retExpr_->accept(vstr);
         }
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<expression> ret_expr_;
+    Expression* retExpr_;
 };
 
 /*
@@ -345,492 +432,654 @@ Expressions
 -------------------------------
 */
 
-class expression_list : public node {
+#if 0
+class ExpressionList : public Node {
 public:
-    expression_list() = default;
+    ExpressionList() = default;
 
-    void add_expression(std::shared_ptr<expression> expr) {
-        expression_list_.push_back(expr);
+    void addExpression(Expression* expr) {
+        ExpressionList_.push_back(expr);
     }
 
-    node_type get_type() override { return node_type::EXPRESSION_LIST; }
+    NodeType getNodeType() const override { return NodeType::EXPRESSION_LIST; }
 
-    unsigned int children() override { return expression_list_.size(); }
+    unsigned int children() const override { return ExpressionList_.size(); }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i >= expression_list_.size()) return nullptr;
-        return expression_list_[i];
+    Node* child(unsigned int i) override {
+        if (i >= ExpressionList_.size()) return nullptr;
+        return ExpressionList_[i];
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        for (auto&& expr : expression_list_) {
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        for (auto&& expr : ExpressionList_) {
             expr->accept(vstr);
         }
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
 
 private:
-    std::vector<std::shared_ptr<expression>> expression_list_;
+    std::vector<Expression*> ExpressionList_;
 };
+#endif
 
-class binop_expr : public expression {
+class BinopExpr : public Expression {
 public:
-    binop_expr() = default;
+    BinopExpr(Node* parent, SourceLocation sourceLoc,
+              Type* evalType, Expression* lExp, 
+              Expression* rExp, OpType bType)
+      : Expression(parent, sourceLoc, evalType, ValueCategory::RVALUE), 
+        leftExpr_(lExp), rightExpr_(rExp), OpType_(bType) {}
 
-    binop_expr(std::shared_ptr<expression> l_exp,
-               std::shared_ptr<expression> r_exp,
-               op_type b_type
-              )
-              : left_expr_(l_exp)
-              , right_expr_(r_exp)
-              , op_type_(b_type) {}
-
-    void add_left_expr(std::shared_ptr<expression> left_expr) {
-        left_expr_ = left_expr;
+    void addLeftExpr(Expression* leftExpr) {
+        leftExpr_ = leftExpr;
     }
 
-    void add_right_expr(std::shared_ptr<expression> right_expr) {
-        right_expr_ = right_expr;
+    void addRightExpr(Expression* rightExpr) {
+        rightExpr_ = rightExpr;
     }
 
-    void set_op_type(op_type op_type) {
-        op_type_ = op_type;
+    void setOpType(OpType OpType) {
+        OpType_ = OpType;
     }
 
-    op_type get_op_type() { return op_type_; }
+    Expression* getLhsExpr() { return leftExpr_; }
 
-    node_type get_type() override { return node_type::BINOP_EXPR; }
+    Expression* getRhsExpr() { return rightExpr_; }
 
-    unsigned int children() override { return 2; }
+    OpType getOpType() const { return OpType_; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return left_expr_;
-        if (i == 1) return right_expr_;
+    NodeType getNodeType() const override { return NodeType::BINOP_EXPR; }
+
+    unsigned int children() const override { return 2; }
+
+    Node* child(unsigned int i) override {
+        if (i == 0) return leftExpr_;
+        if (i == 1) return rightExpr_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        left_expr_->accept(vstr);
-        right_expr_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        leftExpr_->accept(vstr);
+        rightExpr_->accept(vstr);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<expression> left_expr_;
-    std::shared_ptr<expression> right_expr_;
-    op_type op_type_;
+    Expression* leftExpr_;
+    Expression* rightExpr_;
+    OpType OpType_;
 };
 
-class unop_expr : public expression {
+class UnopExpr : public Expression {
 public:
-    unop_expr() = default;
+    UnopExpr(Node* parent, SourceLocation sourceLoc,
+             Type* evalType, Expression* expr, OpType uType)
+              : Expression(parent, sourceLoc, evalType, ValueCategory::RVALUE), 
+                operandExpr_(expr), OpType_(uType) {}
 
-    unop_expr(std::shared_ptr<expression> exp, 
-              op_type u_type
-             )
-             : expr_(exp), 
-               op_type_(u_type) {}
-
-    void add_unop_expr(std::shared_ptr<expression> expr) {
-        expr_ = expr;
+    void addUnopExpr(Expression* expr) {
+        operandExpr_ = expr;
     }
 
-    void set_unop_type(op_type type) { op_type_ = type; } 
+    void setUnOpType(OpType type) { OpType_ = type; } 
 
-    op_type get_op_type() { return op_type_; }
+    Expression* getOperand() { return operandExpr_; }
 
-    node_type get_type() override { return node_type::UNOP_EXPR; }
+    OpType getOpType() const { return OpType_; }
 
-    unsigned int children() override { return 1; }
+    NodeType getNodeType() const override { return NodeType::UNOP_EXPR; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return expr_;
+    unsigned int children() const override { return 1; }
+
+    Node* child(unsigned int i) override {
+        if (i == 0) return operandExpr_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        expr_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        operandExpr_->accept(vstr);
+        vstr.postVisit(this);
     }
     
 private:
-    std::shared_ptr<expression> expr_;
-    op_type op_type_;
+    Expression* operandExpr_;
+    OpType OpType_;
 };
 
-class literal_expr : public expression {
+class NewArrayExpr : public Expression {
 public:
-    literal_expr() = default;
-    literal_expr(std::string value, literal_type lit_kind)
-                : value_(value), lit_kind_(lit_kind) {}
-
-    void set_literal_type(literal_type lit_kind) { lit_kind_ = lit_kind; }
-
-    void set_value(std::string value) { value_ = value; }
-
-    literal_type get_literal_type() { return lit_kind_; }
-
-    std::string get_value() { return value_; }
-
-    node_type get_type() override { return node_type::LITERAL_EXPR; }
-
-    unsigned int children() override { return 0; }
-
-    std::shared_ptr<node> child(unsigned int i) override { return nullptr; }
-
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        vstr.post_visit(this);
-    }
+    NewArrayExpr(Node* parent, SourceLocation sourceLoc,
+                 Type* arrayType, Type* arrayElemType,
+                 Expression* sizeExpr)
+              : Expression(parent, sourceLoc, arrayType, ValueCategory::LVALUE), 
+                arrayElemType_(arrayElemType), sizeExpr_(sizeExpr) {}
     
+    void setArrayElemType(Type* type) { arrayElemType_ = type; }
+
+    void setArraySize(Expression* sizeExpr) { sizeExpr_ = sizeExpr; }
+
+    Type* getArrayElemType() const { return arrayElemType_; }
+
+    Expression* getSizeExpr() { return sizeExpr_; }
+
+    NodeType getNodeType() const override { return NodeType::NEW_ARRAY_EXPR; }
+
+    unsigned children() const override { return 1; }
+
+    Node* child(unsigned int i) override { 
+        if (i == 0) return sizeExpr_;
+        return nullptr; 
+    }
+
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        sizeExpr_->accept(vstr);
+        vstr.postVisit(this);
+    }
+
+private:
+    Type* arrayElemType_;
+    Expression* sizeExpr_;
+};
+
+class DeleteArrayExpr : public Expression {
+public:
+    DeleteArrayExpr(Node* parent, SourceLocation sourceLoc,
+                    Type* arrayElemType, Expression* arrayExpr)
+        : Expression(parent, sourceLoc,
+                     Type::getVoidTy(), ValueCategory::NOT_VALUE), 
+          arrayExpr_(arrayExpr) {}
+    
+    void setArray(Expression* arrayExpr) { arrayExpr_ = arrayExpr; }
+
+    Expression* getArrayExpr() { return arrayExpr_; }
+
+    NodeType getNodeType() const override { return NodeType::NEW_ARRAY_EXPR; }
+
+    unsigned children() const override { return 1; }
+
+    Node* child(unsigned int i) override { 
+        if (i == 0) return arrayExpr_;
+        return nullptr; 
+    }
+
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        arrayExpr_->accept(vstr);
+        vstr.postVisit(this);
+    }
+
+private:
+    Expression* arrayExpr_;
+};
+
+class LiteralExpr : public Expression {
+public:
+    LiteralExpr(Node* parent, SourceLocation sourceLoc,
+                Type* literalType, std::string literalValue)
+        : Expression(parent, sourceLoc,
+                     literalType, ValueCategory::RVALUE), 
+          value_(literalValue) {}
+
+    void setLiteralType(Type* litType) { evalType_ = litType; }
+
+    void setValue(std::string value) { value_ = value; }
+
+    Type* getLiteralType() const { return evalType_; }
+
+    std::string getValue() const { return value_; }
+
+    NodeType getNodeType() const override { return NodeType::LITERAL_EXPR; }
+
+    unsigned children() const override { return 0; }
+
+    Node* child(unsigned int i) override { return nullptr; }
+
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        vstr.postVisit(this);
+    }
+
 private:
     std::string value_;
-    literal_type lit_kind_;
 };
 
-class name_expr : public expression {
+class NameExpr : public Expression {
 public:
-    name_expr() = default;
-    name_expr(std::string name) : name_(name) {}
+    NameExpr(Node* parent, SourceLocation sourceLoc,
+             Type* literalType, std::string name)
+        : Expression(parent, sourceLoc,
+                     literalType, ValueCategory::LVALUE), 
+          name_(name) {}
 
-    std::string get_name() { return name_; }
+    std::string getName() const { return name_; }
 
-    void set_name(std::string name) { name_ = name; }
+    void setName(std::string name) { name_ = name; }
 
-    node_type get_type() override { return node_type::NAME_EXPR; }
+    NodeType getNodeType() const override { return NodeType::NAME_EXPR; }
 
-    unsigned int children() override { return 0; }
+    unsigned int children() const override { return 0; }
 
-    std::shared_ptr<node> child(unsigned int i) override { return nullptr; }
+    Node* child(unsigned int i) override { return nullptr; }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        vstr.postVisit(this);
     }
 
 private:
     std::string name_; 
 };
 
-class array_member_expr : public expression {
+class ArrayMemberExpr : public Expression {
 public:
-    array_member_expr() = default;
+    ArrayMemberExpr(Node* parent, SourceLocation sourceLoc,
+                    Type* arrayType, Expression* arrayExpr,
+                    Expression* indexExpr)
+        : Expression(parent, sourceLoc,
+                     arrayType, ValueCategory::LVALUE),
+          arrayExpr_(arrayExpr), indexExpr_(indexExpr) {}
 
-    array_member_expr(std::shared_ptr<expression> id,
-                      std::shared_ptr<expression> member
-                     )
-                     : identifier_(id)
-                     , index_(member) {}
-
-    void add_identtifier_expr(std::shared_ptr<expression> identifier) {
-        identifier_ = identifier;
+    void addArrayExpr(Expression* arrayExpr) {
+        arrayExpr_ = arrayExpr;
     }
 
-    void add_index_expr(std::shared_ptr<expression> index) {
-        index_ = index;
+    void addIndexExpr(Expression* indexExpr) {
+        indexExpr_ = indexExpr;
     }
 
-    node_type get_type() override { return node_type::ARRAY_MEMBER_EXPR; }
+    NodeType getNodeType() const override { return NodeType::ARRAY_MEMBER_EXPR; }
 
-    unsigned int children() override { return 2; }
+    unsigned int children() const override { return 2; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return identifier_;
-        if (i == 1) return index_;
+    Node* child(unsigned int i) override {
+        if (i == 0) return arrayExpr_;
+        if (i == 1) return indexExpr_;
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        identifier_->accept(vstr);
-        index_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        arrayExpr_->accept(vstr);
+        indexExpr_->accept(vstr);
+        vstr.postVisit(this);
     }
     
 private:
-    std::shared_ptr<expression> identifier_;
-    std::shared_ptr<expression> index_;
+    Expression* arrayExpr_;
+    Expression* indexExpr_;
 };
 
-class subroutine_call_expr : public expression {
+class SubroutineCallExpr : public Expression {
 public:
-    subroutine_call_expr() = default;
-    
-    subroutine_call_expr(std::shared_ptr<expression> id,
-                         std::shared_ptr<expression_list> arguments
-                        )
-                        : identifier_(id)
-                        , args_(arguments) {}
+    SubroutineCallExpr(Node* parent, SourceLocation sourceLoc,
+                      Type* returnType, ValueCategory valueCategory,
+                      Expression* subroutineExpr,
+                      std::vector<Expression*> arguments)
+        : Expression(parent, sourceLoc,
+                     returnType, valueCategory),
+          subroutineExpr_(subroutineExpr), args_(std::move(arguments)) {}
 
-    void add_identifier(std::shared_ptr<expression> identifier) {
-        identifier_ = identifier;
+    void addSubroutineExpr(Expression* subroutineExpr) {
+        subroutineExpr_ = subroutineExpr;
     }
 
-    void add_args(std::shared_ptr<expression_list> args) {
-        args_ = args;
+    void addArgs(std::vector<Expression*> args) {
+        args_ = std::move(args);
     }
 
-    unsigned get_arg_count() { return args_->children(); }
+    unsigned getArgCount() const { return args_.size(); }
 
-    node_type get_type() override { return node_type::CALL_EXPR; }
+    NodeType getNodeType() const override { return NodeType::CALL_EXPR; }
 
-    unsigned int children() override { return 2; }
+    unsigned children() const override { return 2; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return identifier_;
-        if (i == 1) return args_;
+    Node* child(unsigned i) override {
+        if (i == 0) return subroutineExpr_;
+        if (i >= 1 && i <= args_.size()) return args_[i - 1];
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        identifier_->accept(vstr);
-        args_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        subroutineExpr_->accept(vstr);
+        for (auto argExpr : args_) {
+            argExpr->accept(vstr);
+        }
+        vstr.postVisit(this);
     }
     
 private:
-    std::shared_ptr<expression> identifier_;
-    std::shared_ptr<expression_list> args_;
+    Expression* subroutineExpr_;
+    std::vector<Expression*> args_;
 };
 
-class member_expr : public expression {
+class MemberExpr : public Expression {
 public:
-    member_expr() = default;
+    MemberExpr(Node* parent, SourceLocation sourceLoc,
+            Type* memberType, ValueCategory valueCategory,
+            Expression* identifier,
+            std::string member)
+        : Expression(parent, sourceLoc,
+                     memberType, valueCategory),
+          identifier_(identifier), member_(std::move(member)) {}
 
-    member_expr(std::shared_ptr<expression> id,
-                std::string member
-               ) 
-               : identifier_(id)
-               , member_(member) {}
-
-    void add_identifier(std::shared_ptr<expression> identifier) {
+    void addIdentifier(Expression* identifier) {
         identifier_ = identifier;
     }
 
-    void add_member(std::string member) {
+    void addMember(std::string member) {
         member_ = member;
     }
 
-    std::string get_member() { return member_; }
+    std::string getMember() const { return member_; }
 
-    node_type get_type() override { return node_type::MEMBER_EXPR; }
+    NodeType getNodeType() const override { return NodeType::MEMBER_EXPR; }
 
-    unsigned int children() override { return 1; }
+    unsigned int children() const override { return 1; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
+    Node* child(unsigned int i) override {
         if (i == 0) return identifier_;
         return nullptr;
     }
     
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
         identifier_->accept(vstr);
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<expression> identifier_;
+    Expression* identifier_;
     std::string member_;
 };
 
 
 /*
-Subroutine body node handles variables declaration and all statements in body
+Subroutine body Node handles variables declaration and all statements in body
 */
-class subroutine_body : public node {
+class SubroutineBody : public Node {
 public:
-    subroutine_body() = default;
+    SubroutineBody(Node* parent,
+                SourceLocation sourceLoc,
+                std::vector<LocalVarDec*> localVars,
+                StatementList* statementList)
+            : Node(parent, std::move(sourceLoc)),
+              localVars_(std::move(localVars)),
+              statementList_(statementList)
+            {}
 
-    void set_var_list(std::shared_ptr<variable_dec_list> vars) {
-        var_list_ = vars;
+    void setVarList(std::vector<LocalVarDec*> vars) {
+        localVars_ = std::move(vars);
     }
 
-    void set_statement_list(std::shared_ptr<statement_list> stmts) {
-        stmt_list_ = stmts;
+    void setStatementList(StatementList* statementList) {
+        statementList_ = statementList;
     }
 
-    node_type get_type() override { return node_type::SUBRTN_BODY; }
+    NodeType getNodeType() const override { return NodeType::SUBRTN_BODY; }
 
-    unsigned int children() override { return 2; }
+    unsigned int children() const override { return localVars_.size() + 1; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return var_list_;
-        if (i == 1) return stmt_list_;
+    Node* child(unsigned int i) override {
+        if (i >= 0 && i < localVars_.size()) return localVars_[i];
+        if (i == localVars_.size()) return statementList_;
         return nullptr;
     }
     
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        var_list_->accept(vstr);
-        stmt_list_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        for (auto varDec : localVars_) {
+            varDec->accept(vstr);
+        }
+        statementList_->accept(vstr);
+        vstr.postVisit(this);
     }
 
 private:
-    std::shared_ptr<variable_dec_list> var_list_;
-    std::shared_ptr<statement_list> stmt_list_;
+    std::vector<LocalVarDec*> localVars_;
+    StatementList* statementList_;
 };
 
 /*
-Subroutine declaration node handles name and body of method/constructor/function
+Subroutine declaration Node handles name and body of method/constructor/function
 */
-class subroutine_dec : public node {
+class SubroutineDec : public Node {
 public:
-    subroutine_dec() = default;
+    SubroutineDec(Node* parent,
+                  SourceLocation sourceLoc,
+                  std::string name,
+                  Type* retType,
+                  std::vector<ArgumentVarDec*> arguments,
+                  SubroutineBody* body)
+            : Node(parent, std::move(sourceLoc)),
+              name_(std::move(name)), retType_(retType),
+              args_(std::move(arguments)), body_(body)
+            {}
 
-    void set_name(std::string name) { name_ = name; }
+    virtual NodeType getNodeType() const = 0;
 
-    void set_ret_type(std::string ret_type) { ret_type_ = ret_type; }
+    void setName(std::string name) { name_ = name; }
 
-    void add_arg_list(std::shared_ptr<variable_dec_list> args) { 
-        args_ = args;
+    void setRetType(Type* retType) { retType_ = retType; }
+
+    void addArgList(std::vector<ArgumentVarDec*> args) {
+        args_ = std::move(args);
     }
 
-    void add_body(std::shared_ptr<subroutine_body> body) {
+    void addBody(SubroutineBody* body) {
         body_ = body;
     }
 
-    void set_subroutine_kind(subroutine_kind s_type) {
-        subrtn_type_ = s_type;
-    }
+    std::string getName() const { return name_; }
 
-    std::string get_name() { return name_; }
+    Type* getRetType() const { return retType_; }
 
-    std::string get_ret_type() { return ret_type_; }
+    unsigned children() const override { return args_.size() + 1; }
 
-    subroutine_kind get_subroutine_kind() { return subrtn_type_; }
-
-    node_type get_type() override { return node_type::SUBRTN_DEC; }
-
-    unsigned int children() override { return 2; }
-
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return args_;
-        if (i == 1) return body_;
+    Node* child(unsigned idx) override {
+        if (idx >= 0 && idx < args_.size()) return args_[idx];
+        if (idx == args_.size()) return body_;
         return nullptr;
     }
   
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        args_->accept(vstr);
-        body_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        for (auto arg : args_) {
+            arg->accept(vstr);
+        }
+        if (body_) body_->accept(vstr);
+        vstr.postVisit(this);
     }
 
 private:
     std::string name_;
-    std::string ret_type_;
-    std::shared_ptr<variable_dec_list> args_;
-    std::shared_ptr<subroutine_body> body_;
-    subroutine_kind subrtn_type_;
+    Type* retType_;
+    std::vector<ArgumentVarDec*> args_;
+    SubroutineBody* body_;
 };
 
-
-class subroutine_list : public node {
+class ConstructorDec final : public SubroutineDec {
 public:
-    subroutine_list() = default;
+    NodeType getNodeType() const override { return NodeType::CONSTRUCTOR_DEC; }
+};
 
-    void add_subroutine(std::shared_ptr<subroutine_dec> subrtn) {
+class FunctionDec final : public SubroutineDec {
+public:
+    NodeType getNodeType() const override { return NodeType::FUNCTION_DEC; }
+};
+
+class MethodDec final : public SubroutineDec {
+public:
+    NodeType getNodeType() const override { return NodeType::METHOD_DEC; }
+};
+
+#if 0
+class SubroutineList : public Node {
+public:
+    SubroutineList() = default;
+
+    NodeType getNodeType() const override { return NodeType::SUBRNT_DEC_LIST; };
+    
+    void addSubroutine(SubroutineDec* subrtn) {
         subrtns_.push_back(subrtn);
     }
 
-    node_type get_type() override { return node_type::SUBRTN_LIST; }
+    unsigned int children() const override { return subrtns_.size(); }
 
-    unsigned int children() override { return subrtns_.size(); }
-
-    std::shared_ptr<node> child(unsigned int i) override {
+    Node* child(unsigned int i) override {
         if (i >= subrtns_.size()) return nullptr;
         return subrtns_[i];
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
         for (auto&& sub : subrtns_) {
             sub->accept(vstr);
         }
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
      
 private:
-    std::vector<std::shared_ptr<subroutine_dec>> subrtns_;
+    std::vector<SubroutineDec*> subrtns_;
 };
+#endif
 
 /*
-Class declaration node which handles Jack class name and subroutines
+Class declaration Node which handles Jack class name and subroutines
 */
-class class_dec : public node {
+class ClassDec : public Node {
 public:
-    class_dec() = default;
+    ClassDec(Node* parent,
+             SourceLocation sourceLoc,
+             std::vector<FieldVarDec*> fieldVars,
+             std::vector<StaticVarDec*> staticVars,
+             std::vector<SubroutineDec*> subroutineList)
+        : Node(parent, std::move(sourceLoc)),
+          fieldVars_(std::move(fieldVars)),
+          staticVars_(std::move(staticVars)),
+          subroutineList_(std::move(subroutineList))
+        {}
 
-    void add_var_list(std::shared_ptr<variable_dec_list> var_list) {
-        vars_ = var_list;
+    void addFieldVarList(std::vector<FieldVarDec*> fieldVars) {
+        fieldVars_ = std::move(fieldVars);
     }
 
-    void add_subroutine_list(std::shared_ptr<subroutine_list> subrtn_list) {
-        subrtns_ = subrtn_list;
+    void addStaticVarList(std::vector<StaticVarDec*> staticVars) {
+        staticVars_ = std::move(staticVars);
     }
 
-    void set_name(std::string name) { class_name_ = name; }
+    void addSubroutineList(std::vector<SubroutineDec*> subroutineList) {
+        subroutineList_ = std::move(subroutineList);
+    }
 
-    std::string get_name() { return class_name_; }
+    void setName(std::string name) { className_ = std::move(name); }
 
-    node_type get_type() override { return node_type::CLASS_DEC; }
+    std::string getName() const { return className_; }
 
-    unsigned int children() override { return 2; }
+    NodeType getNodeType() const override { return NodeType::CLASS_DEC; }
 
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i == 0) return vars_;
-        if (i == 1) return subrtns_;
+    unsigned children() const override { 
+        return fieldVars_.size() + staticVars_.size() + subroutineList_.size(); 
+    }
+
+    Node* child(unsigned idx) override {
+        if (idx >= 0 && idx < fieldVars_.size()) {
+            return fieldVars_[idx];
+        }
+
+        unsigned staticVarsSentinel = fieldVars_.size() + 
+                                    staticVars_.size();
+        if (idx >= fieldVars_.size() && idx < staticVarsSentinel) {
+            unsigned fIdx = idx - fieldVars_.size();
+            return staticVars_[fIdx];
+        }
+
+        unsigned subroutinesSentinel = staticVarsSentinel + 
+                                    subroutineList_.size();
+        if (idx >= staticVarsSentinel && idx < subroutinesSentinel) {
+            unsigned sIdx = idx - fieldVars_.size() - staticVars_.size();
+            return subroutineList_[sIdx];
+        }
+
         return nullptr;
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        vars_->accept(vstr);
-        subrtns_->accept(vstr);
-        vstr.post_visit(this);
+    void accept(Visitor &vstr) override {
+        vstr.preVisit(this);
+        for (auto fieldVar : fieldVars_) fieldVar->accept(vstr);
+        for (auto staticVar : staticVars_) staticVar->accept(vstr);
+        for (auto subroutine : subroutineList_) subroutine->accept(vstr);
+        vstr.postVisit(this);
     }
 
 private:
-    std::string class_name_;
-    std::shared_ptr<variable_dec_list> vars_;
-    std::shared_ptr<subroutine_list> subrtns_;
+    std::string className_;
+    std::vector<FieldVarDec*> fieldVars_;
+    std::vector<StaticVarDec*> staticVars_;
+    std::vector<SubroutineDec*> subroutineList_;
 };
 
-/*
-Program node which handles all Jack classes in file
-*/
-class program : public node {
+class FileUnit final {
 public:
-    program() = default;
+    FileUnit(std::string fileName) : fileName_(std::move(fileName))
+        {}
 
-    void add_class(std::shared_ptr<class_dec> cl_dec) {
-        classes_.push_back(cl_dec);
+    std::string getFileName() const { return fileName_; }
+
+    void addClass(ClassDec* clDec) {
+        classes_.push_back(clDec);
     }
 
-    node_type get_type() override {return node_type::PROGRAM;};
-    
-    unsigned int children() override {return classes_.size();}
-    
-    std::shared_ptr<node> child(unsigned int i) override {
-        if (i >= classes_.size()) {
-            return nullptr;
-        }
+    unsigned classCount() const { return classes_.size(); }
+
+    ClassDec* getClass(unsigned i) { 
+        if (i >= classes_.size()) return nullptr;
         return classes_[i];
     }
 
-    void accept(visitor &vstr) override {
-        vstr.pre_visit(this);
-        for (auto&& cl : classes_) {
-            cl->accept(vstr);
+    void accept(Visitor &vstr) {
+        vstr.preVisit(this);
+        for (auto && clDec : classes_) {
+            clDec->accept(vstr);
         }
-        vstr.post_visit(this);
+        vstr.postVisit(this);
     }
 
 private:
-    std::vector<std::shared_ptr<class_dec>> classes_;
+    std::string fileName_;
+    std::vector<ClassDec*> classes_;
+};
+
+/*
+Program Node which handles all Jack classes in file
+*/
+class Program final {
+public:
+    Program() = default;
+
+    void addFile(FileUnit* clDec) {
+        fileUnits_.push_back(clDec);
+    }
+    
+    unsigned filesCount() const { return fileUnits_.size(); }
+    
+    FileUnit* getFile(unsigned int i) {
+        if (i >= fileUnits_.size()) return nullptr;
+        return fileUnits_[i];
+    }
+
+    void accept(Visitor &vstr) {
+        vstr.preVisit(this);
+        for (auto && fileUnit : fileUnits_) {
+            fileUnit->accept(vstr);
+        }
+        vstr.postVisit(this);
+    }
+
+private:
+    std::vector<FileUnit*> fileUnits_;
 };

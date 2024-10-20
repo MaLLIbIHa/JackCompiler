@@ -5,9 +5,9 @@
 #include <cctype>
 #include <vector>
 
-enum class token_kind {
+enum class TokenKind {
     NOT_KEYWORD = 0,
-    keyword_beg,
+    keywordBeg,
     CLASS,
     CONSTRUCTOR,
     FUNCTION,
@@ -19,25 +19,27 @@ enum class token_kind {
     CHAR,
     BOOLEAN,
     VOID,
+    NEW_ARRAY,
+    DELETE_ARRAY,
 
-    constant_beg,
+    constantBeg,
     TRUE,
     FALSE,
     NULL_KEYWORD,
     THIS,
-    constant_end,
+    constantEnd,
 
-    statement_beg,
+    statementBeg,
     LET,
     DO,
     IF,
     ELSE,
     WHILE,
     RETURN,
-    statement_end,
-    keyword_end,
+    statementEnd,
+    keywordEnd,
 
-    symbol_beg,
+    symbolBeg,
     LPAREN,     // (
     RPAREN,     // )
     LBRACK,     // [
@@ -49,7 +51,7 @@ enum class token_kind {
     SEMICOLON,  // ;
     ASSIGN,     // =
 
-    binop_beg,
+    binopBeg,
     ADD,        // +
     SUB,        // -
     MUL,        // *
@@ -61,99 +63,102 @@ enum class token_kind {
     LSS,        // <
     GTR,        // >
     EQL,        // ==
-    binop_end,
+    binopEnd,
 
     TILDE,      // ~
-    symbol_end
+    symbolEnd
 };
 
-enum class token_type {
+enum class TokenType {
     EMPTY_TOKEN,
     KEYWORD,
     SYMBOL,
+    CHAR_LITERAL,
     STR_LITERAL,
     INT_LITERAL,
     IDENTIFIER,
-    T_EOF,
+    TEOF,
 };
 
-class token {
+class Token final {
 public:
-    inline static const std::map<std::string, token_kind> keywords = {{"class"       , token_kind::CLASS},
-                                                                      {"constructor" , token_kind::CONSTRUCTOR},
-                                                                      {"function"    , token_kind::FUNCTION},
-                                                                      {"method"      , token_kind::METHOD},
-                                                                      {"field"       , token_kind::FIELD},
-                                                                      {"static"      , token_kind::STATIC},
-                                                                      {"var"         , token_kind::VAR},
-                                                                      {"int"         , token_kind::INT},
-                                                                      {"char"        , token_kind::CHAR},
-                                                                      {"boolean"     , token_kind::BOOLEAN},
-                                                                      {"void"        , token_kind::VOID},
-                                                                      {"true"        , token_kind::TRUE},
-                                                                      {"false"       , token_kind::FALSE},
-                                                                      {"null"        , token_kind::NULL_KEYWORD},
-                                                                      {"this"        , token_kind::THIS},
-                                                                      {"let"         , token_kind::LET},
-                                                                      {"do"          , token_kind::DO},
-                                                                      {"if"          , token_kind::IF},
-                                                                      {"else"        , token_kind::ELSE},
-                                                                      {"while"       , token_kind::WHILE},
-                                                                      {"return"      , token_kind::RETURN},
-                                                                      {"("           , token_kind::LPAREN},
-                                                                      {")"           , token_kind::RPAREN},
-                                                                      {"["           , token_kind::LBRACK},
-                                                                      {"]"           , token_kind::RBRACK}, 
-                                                                      {"{"           , token_kind::LBRACE},
-                                                                      {"}"           , token_kind::RBRACE},
-                                                                      {"."           , token_kind::DOT},
-                                                                      {","           , token_kind::COMMA},
-                                                                      {";"           , token_kind::SEMICOLON},
-                                                                      {"+"           , token_kind::ADD},
-                                                                      {"-"           , token_kind::SUB},
-                                                                      {"*"           , token_kind::MUL},
-                                                                      {"/"           , token_kind::QUO},
-                                                                      {"&&"          , token_kind::LOG_AND},
-                                                                      {"||"          , token_kind::LOG_OR},
-                                                                      {"&"           , token_kind::BIT_AND},
-                                                                      {"|"           , token_kind::BIT_OR},
-                                                                      {"<"           , token_kind::LSS},
-                                                                      {">"           , token_kind::GTR},
-                                                                      {"="           , token_kind::ASSIGN},
-                                                                      {"=="          , token_kind::EQL},
-                                                                      {"~"           , token_kind::TILDE}};
+    inline static const std::map<std::string, TokenKind> keywords =  {{"class"       , TokenKind::CLASS},
+                                                                      {"constructor" , TokenKind::CONSTRUCTOR},
+                                                                      {"function"    , TokenKind::FUNCTION},
+                                                                      {"method"      , TokenKind::METHOD},
+                                                                      {"field"       , TokenKind::FIELD},
+                                                                      {"static"      , TokenKind::STATIC},
+                                                                      {"var"         , TokenKind::VAR},
+                                                                      {"int"         , TokenKind::INT},
+                                                                      {"char"        , TokenKind::CHAR},
+                                                                      {"boolean"     , TokenKind::BOOLEAN},
+                                                                      {"void"        , TokenKind::VOID},
+                                                                      {"newArray"    , TokenKind::NEW_ARRAY},
+                                                                      {"deleteArray" , TokenKind::DELETE_ARRAY},
+                                                                      {"true"        , TokenKind::TRUE},
+                                                                      {"false"       , TokenKind::FALSE},
+                                                                      {"null"        , TokenKind::NULL_KEYWORD},
+                                                                      {"this"        , TokenKind::THIS},
+                                                                      {"let"         , TokenKind::LET},
+                                                                      {"do"          , TokenKind::DO},
+                                                                      {"if"          , TokenKind::IF},
+                                                                      {"else"        , TokenKind::ELSE},
+                                                                      {"while"       , TokenKind::WHILE},
+                                                                      {"return"      , TokenKind::RETURN},
+                                                                      {"("           , TokenKind::LPAREN},
+                                                                      {")"           , TokenKind::RPAREN},
+                                                                      {"["           , TokenKind::LBRACK},
+                                                                      {"]"           , TokenKind::RBRACK}, 
+                                                                      {"{"           , TokenKind::LBRACE},
+                                                                      {"}"           , TokenKind::RBRACE},
+                                                                      {"."           , TokenKind::DOT},
+                                                                      {","           , TokenKind::COMMA},
+                                                                      {";"           , TokenKind::SEMICOLON},
+                                                                      {"+"           , TokenKind::ADD},
+                                                                      {"-"           , TokenKind::SUB},
+                                                                      {"*"           , TokenKind::MUL},
+                                                                      {"/"           , TokenKind::QUO},
+                                                                      {"&&"          , TokenKind::LOG_AND},
+                                                                      {"||"          , TokenKind::LOG_OR},
+                                                                      {"&"           , TokenKind::BIT_AND},
+                                                                      {"|"           , TokenKind::BIT_OR},
+                                                                      {"<"           , TokenKind::LSS},
+                                                                      {">"           , TokenKind::GTR},
+                                                                      {"="           , TokenKind::ASSIGN},
+                                                                      {"=="          , TokenKind::EQL},
+                                                                      {"~"           , TokenKind::TILDE}};
 
 public:
-    token() = default;
+    Token() = default;
 
-    token(token_type tok_t, token_kind kind, std::string value)
-         : type_(tok_t), kind_(kind), value_(value)
+    Token(TokenType tokT, TokenKind kind, std::string value)
+         : type_(tokT), kind_(kind), value_(value)
          {}
 
-    void set_line_pos(unsigned int line_pos) { line_pos_ = line_pos; }
+    void setLinePos(unsigned int linePos) { linePos_ = linePos; }
 
-    void set_in_line_pos(unsigned int in_line_pos) { in_line_pos_ = in_line_pos; }
+    void setInLinePos(unsigned int inLinePos) { inLinePos_ = inLinePos; }
 
-    void set_value(std::string val) { value_ = val; }
+    void setValue(std::string val) { value_ = val; }
 
-    void set_type(token_type type) { type_ = type; }
+    void setType(TokenType type) { type_ = type; }
 
-    void set_kind(token_kind kind) { kind_ = kind; }
+    void setKind(TokenKind kind) { kind_ = kind; }
 
-    unsigned int get_line_pos() { return line_pos_; }
+    unsigned int getLinePos() { return linePos_; }
 
-    unsigned int get_in_line_pos() { return in_line_pos_; }
+    unsigned int getInLinePos() { return inLinePos_; }
 
-    std::string get_value() { return value_; }
+    std::string getValue() { return value_; }
 
-    token_type get_type() { return type_; }
+    TokenType getType() { return type_; }
 
-    token_kind get_kind() { return kind_; }
+    TokenKind getKind() { return kind_; }
 
 private:
     std::string value_;
-    token_type type_ = token_type::EMPTY_TOKEN;
-    token_kind kind_ = token_kind::NOT_KEYWORD;
-    unsigned int line_pos_ = 0;
-    unsigned int in_line_pos_ = 0;
+    TokenType type_ = TokenType::EMPTY_TOKEN;
+    TokenKind kind_ = TokenKind::NOT_KEYWORD;
+    unsigned int linePos_ = 0;
+    unsigned int inLinePos_ = 0;
 };

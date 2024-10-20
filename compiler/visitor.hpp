@@ -1,74 +1,110 @@
 #pragma once
 
-class program;
-class class_dec;
-class variable_dec_list;
-class subroutine_list;
-class subroutine_dec;
-class subroutine_body;
-class variable_dec;
-class statement_list;
-class let_statement;
-class if_statement;
-class while_statement;
-class do_statement;
-class return_statement;
-class expression_list;
-class binop_expr;
-class unop_expr;
-class literal_expr;
-class name_expr;
-class array_member_expr;
-class subroutine_call_expr;
-class member_expr;
-class expression;
+class Program;
+class FileUnit;
+class ClassDec;
+class VariableDecList;
+class FieldVariableList;
+class StaticVariableList;
+class SubroutineArgumentList;
+class LocalVariableList;
+class SubroutineDec;
+class SubroutineList;
+class ConstructorDec;
+class FunctionDec;
+class MethodDec;
+class SubroutineBody;
+class VariableDec;
+class FieldVarDec;
+class StaticVarDec;
+class ArgumentVarDec;
+class LocalVarDec;
+class StatementList;
+class LetStatement;
+class IfStatement;
+class WhileStatement;
+class DoStatement;
+class ReturnStatement;
+class ExpressionList;
+class BinopExpr;
+class UnopExpr;
+class NewArrayExpr;
+class DeleteArrayExpr;
+class LiteralExpr;
+class NameExpr;
+class ArrayMemberExpr;
+class SubroutineCallExpr;
+class MemberExpr;
+class Expression;
 
-struct visitor {
-    virtual void pre_visit(program *prog) {}
-    virtual void pre_visit(class_dec *cl) {}
-    virtual void pre_visit(variable_dec_list *var_list) {}
-    virtual void pre_visit(subroutine_list *sub_list) {}
-    virtual void pre_visit(subroutine_dec *sub_dec) {}
-    virtual void pre_visit(subroutine_body *sub_body) {}
-    virtual void pre_visit(variable_dec *var_dec) {}
-    virtual void pre_visit(statement_list *stmt_list) {}
-    virtual void pre_visit(let_statement *let_stmt) {}
-    virtual void pre_visit(if_statement *if_stmt) {}
-    virtual void pre_visit(while_statement *while_stmt) {}
-    virtual void pre_visit(do_statement *do_stmt) {}
-    virtual void pre_visit(return_statement *ret_stmt) {}
-    virtual void pre_visit(expression_list *expr_list) {}
-    virtual void pre_visit(binop_expr *binop) {}
-    virtual void pre_visit(unop_expr *unop) {}
-    virtual void pre_visit(literal_expr *literal) {}
-    virtual void pre_visit(name_expr *literal) {}
-    virtual void pre_visit(array_member_expr *arr_expr) {}
-    virtual void pre_visit(subroutine_call_expr *sub_call) {}
-    virtual void pre_visit(member_expr *mem_expr) {}
-    virtual void pre_visit(expression *expr) {}
+struct Visitor {
+    virtual void preVisit(Program *prog) {}
+    virtual void preVisit(FileUnit *fileUnit) {}
+    virtual void preVisit(ClassDec *cl) {}
+    virtual void preVisit(VariableDecList *varList) {}
+    virtual void preVisit(StaticVariableList *staticVarList) {}
+    virtual void preVisit(FieldVariableList *memberVarList) {}
+    virtual void preVisit(SubroutineArgumentList *argList) {}
+    virtual void preVisit(LocalVariableList *localVarList) {}
+    virtual void preVisit(SubroutineList *subList) {}
+    virtual void preVisit(SubroutineDec *subDec) {}
+    virtual void preVisit(SubroutineBody *subBody) {}
+    virtual void preVisit(VariableDec *varDec) {}
+    virtual void preVisit(ArgumentVarDec *varDec) {}
+    virtual void preVisit(LocalVarDec *varDec) {}
+    virtual void preVisit(StaticVarDec *varDec) {}
+    virtual void preVisit(FieldVarDec *varDec) {}
+    virtual void preVisit(StatementList *stmtList) {}
+    virtual void preVisit(LetStatement *letStmt) {}
+    virtual void preVisit(IfStatement *ifStmt) {}
+    virtual void preVisit(WhileStatement *whileStmt) {}
+    virtual void preVisit(DoStatement *doStmt) {}
+    virtual void preVisit(ReturnStatement *retStmt) {}
+    virtual void preVisit(ExpressionList *exprList) {}
+    virtual void preVisit(BinopExpr *binop) {}
+    virtual void preVisit(UnopExpr *unop) {}
+    virtual void preVisit(NewArrayExpr *newArrayExpr) {}
+    virtual void preVisit(DeleteArrayExpr *deleteArrayExpr) {}
+    virtual void preVisit(LiteralExpr *literal) {}
+    virtual void preVisit(NameExpr *literal) {}
+    virtual void preVisit(ArrayMemberExpr *arrExpr) {}
+    virtual void preVisit(SubroutineCallExpr *subCall) {}
+    virtual void preVisit(MemberExpr *memExpr) {}
+    virtual void preVisit(Expression *expr) {}
 
-    virtual void post_visit(program *prog) {}
-    virtual void post_visit(class_dec *cl) {}
-    virtual void post_visit(variable_dec_list *var_list) {}
-    virtual void post_visit(subroutine_list *sub_list) {}
-    virtual void post_visit(subroutine_dec *sub_dec) {}
-    virtual void post_visit(subroutine_body *sub_body) {}
-    virtual void post_visit(variable_dec *var_dec) {}
-    virtual void post_visit(statement_list *stmt_list) {}
-    virtual void post_visit(let_statement *let_stmt) {}
-    virtual void post_visit(if_statement *if_stmt) {}
-    virtual void post_visit(while_statement *while_stmt) {}
-    virtual void post_visit(do_statement *do_stmt) {}
-    virtual void post_visit(return_statement *ret_stmt) {}
-    virtual void post_visit(expression_list *expr_list) {}
-    virtual void post_visit(binop_expr *binop) {}
-    virtual void post_visit(unop_expr *unop) {}
-    virtual void post_visit(literal_expr *literal) {}
-    virtual void post_visit(name_expr *literal) {}
-    virtual void post_visit(array_member_expr *arr_expr) {}
-    virtual void post_visit(subroutine_call_expr *sub_call) {}
-    virtual void post_visit(member_expr *mem_expr) {}
-    virtual void post_visit(expression *expr) {}
+    virtual void postVisit(Program *prog) {}
+    virtual void postVisit(FileUnit *fileUnit) {}
+    virtual void postVisit(ClassDec *cl) {}
+    virtual void postVisit(VariableDecList *varList) {}
+    virtual void postVisit(StaticVariableList *staticVarList) {}
+    virtual void postVisit(FieldVariableList *memberVarList) {}
+    virtual void postVisit(SubroutineArgumentList *argList) {}
+    virtual void postVisit(LocalVariableList *localVarList) {}
+    virtual void postVisit(SubroutineList *subList) {}
+    virtual void postVisit(SubroutineDec *subDec) {}
+    virtual void postVisit(SubroutineBody *subBody) {}
+    virtual void postVisit(VariableDec *varDec) {}
+    virtual void postVisit(ArgumentVarDec *varDec) {}
+    virtual void postVisit(LocalVarDec *varDec) {}
+    virtual void postVisit(StaticVarDec *varDec) {}
+    virtual void postVisit(FieldVarDec *varDec) {}
+    virtual void postVisit(StatementList *stmtList) {}
+    virtual void postVisit(LetStatement *letStmt) {}
+    virtual void postVisit(IfStatement *ifStmt) {}
+    virtual void postVisit(WhileStatement *whileStmt) {}
+    virtual void postVisit(DoStatement *doStmt) {}
+    virtual void postVisit(ReturnStatement *retStmt) {}
+    virtual void postVisit(ExpressionList *exprList) {}
+    virtual void postVisit(BinopExpr *binop) {}
+    virtual void postVisit(UnopExpr *unop) {}
+    virtual void postVisit(NewArrayExpr *newArrayExpr) {}
+    virtual void postVisit(DeleteArrayExpr *deleteArrayExpr) {}
+    virtual void postVisit(LiteralExpr *literal) {}
+    virtual void postVisit(NameExpr *literal) {}
+    virtual void postVisit(ArrayMemberExpr *arrExpr) {}
+    virtual void postVisit(SubroutineCallExpr *subCall) {}
+    virtual void postVisit(MemberExpr *memExpr) {}
+    virtual void postVisit(Expression *expr) {}
 
-    virtual ~visitor() = default;
+    virtual ~Visitor() = default;
 };

@@ -5,18 +5,17 @@
 #include <fstream>
 #include <sstream>
 #include <iterator>
-#include "compiler\parser.hpp"
-#include "compiler\print_visitor.hpp"
-#include "compiler\semantic_visitor.hpp"
-#include "compiler\codegen_visitor.hpp"
+#include "compiler\Parser.hpp"
+#include "compiler\PrintVisitor.hpp"
+#include "compiler\CodegenVisitor.hpp"
 
-bool check_err(std::error_code &ec) {
+bool checkErr(std::error_code &ec) {
     bool err = static_cast<bool>(ec);
     if (err) {
         std::cerr << ec << std::endl;
     }
     return err;
-} 
+}
 
 int main(int argc, char** argv) {
     std::vector<std::ifstream> fileStreams;
@@ -30,10 +29,10 @@ int main(int argc, char** argv) {
     std::filesystem::path path = argv[1];
     std::error_code ec;
     if (std::filesystem::exists(path, ec)) {
-        if (check_err(ec)) return 1;
+        if (checkErr(ec)) return 1;
 
         if (std::filesystem::is_directory(path, ec)) {
-            if (check_err(ec)) return 1;
+            if (checkErr(ec)) return 1;
 
             for (const auto &entry : std::filesystem::directory_iterator(path)) {
                 if (entry.path().extension() == ".jack") {
@@ -69,21 +68,23 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // compiler::lexer lex(input_texts[0]);
+    // compiler::lexer lex(inputTexts[0]);
     // std::vector<compiler::token> toks = lex.lex();
     // compiler::parser p(toks);
-    // std::shared_ptr<compiler::program> prog = p.parse_program();
+    // std::sharedPtr<compiler::program> prog = p.parseProgram();
     // compiler::PrintVisitor classVis;
     // classVis.traversal(prog);
 
     std::string sourceText(std::istreambuf_iterator<char>(fileStreams[0]),
                            std::istreambuf_iterator<char>{});
     try {
-        compiler::parser p(sourceText);
-        compiler::print_visitor print_vstr;
-        compiler::semantic_visitor sema_vstr;
-        auto prog = p.parse_program();
-        prog->accept(sema_vstr);
+        Parser p(filenames[0], sourceText);
+        PrintVisitor printVstr;
+        CodegenVisitor semaVstr;
+        auto fileUnit = p.parseFileUnit();
+        Program prog;
+        prog.addFile(fileUnit);
+        prog.accept(semaVstr);
     } catch (std::runtime_error& err) {
         std::cerr << err.what() << std::endl;
         return 1;
