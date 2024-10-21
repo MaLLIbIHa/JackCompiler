@@ -531,7 +531,7 @@ private:
   std::vector<SubroutineDec *> subroutineList_;
 };
 
-class Program {
+class Program final {
 public:
   Program(std::string programName) : programName_(std::move(programName)) {}
 
