@@ -3,14 +3,8 @@
 
 class SourceLocation final {
 public:
-  SourceLocation(std::string fileName, 
-                 unsigned linePos,
-                 unsigned inLinePos)
-      : sourceFileName_(fileName),
-        linePos_(linePos),
-        inLinePos_(inLinePos) {}
-
-  std::string getFileName() const { return sourceFileName_; }
+  SourceLocation(unsigned linePos, unsigned inLinePos)
+      : linePos_(linePos), inLinePos_(inLinePos) {}
 
   unsigned getLinePos() const { return linePos_; }
 
@@ -23,7 +17,6 @@ public:
   }
 
 private:
-  std::string sourceFileName_;
   unsigned linePos_;
   unsigned inLinePos_;
 };

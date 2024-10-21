@@ -1,26 +1,17 @@
 #pragma once
-#include <unordered_map>
-#include <memory>
 #include <string>
+#include <unordered_map>
 
 class Type {
 
 public:
-  enum class TypeId {
-    IntTy,
-    CharTy,
-    BoolTy,
-    ClassTy,
-    ArrayTy,
-    NullTy,
-    VoidTy
-  };
+  enum class TypeId { IntTy, CharTy, BoolTy, ClassTy, ArrayTy, NullTy, VoidTy };
 
 protected:
   Type(TypeId typeId) : typeId_(typeId) {}
 
 public:
-  static bool isAssignable(Type* lhs, Type* rhs) {
+  static bool isAssignable(Type *lhs, Type *rhs) {
     if ((lhs->typeId_ == TypeId::NullTy && rhs->typeId_ == TypeId::ArrayTy) ||
         (lhs->typeId_ == TypeId::NullTy && rhs->typeId_ == TypeId::ClassTy) ||
         (lhs->typeId_ == TypeId::ArrayTy && rhs->typeId_ == TypeId::NullTy) ||
@@ -32,27 +23,27 @@ public:
     return false;
   }
 
-  static Type* getIntTy() {
+  static Type *getIntTy() {
     static Type t(TypeId::IntTy);
     return &t;
   }
 
-  static Type* getCharTy() {
+  static Type *getCharTy() {
     static Type t(TypeId::CharTy);
     return &t;
   }
 
-  static Type* getBoolTy() {
+  static Type *getBoolTy() {
     static Type t(TypeId::BoolTy);
     return &t;
   }
 
-  static Type* getNullTy() {
+  static Type *getNullTy() {
     static Type t(TypeId::NullTy);
     return &t;
   }
 
-  static Type* getVoidTy() {
+  static Type *getVoidTy() {
     static Type t(TypeId::VoidTy);
     return &t;
   }
@@ -60,7 +51,7 @@ public:
   TypeId getTypeId() const { return typeId_; }
 
   // if Type is ArrayType
-  Type* getArrayElementType() const;
+  Type *getArrayElementType() const;
 
   // if Type is ClassType
   std::string getClassName() const;
@@ -86,92 +77,90 @@ private:
 };
 
 class ArrayType final : public Type {
-
-  inline static std::unordered_map<Type*, ArrayType> arrayTypeContainer_;
-
 public:
-  static ArrayType* getArrayTy(Type* type) {
+  static ArrayType *getArrayTy(Type *type) {
+    static std::unordered_map<Type *, ArrayType> arrayTypeContainer_;
     auto type_it = arrayTypeContainer_.find(type);
     if (type_it == arrayTypeContainer_.end()) {
       ArrayType t(TypeId::ArrayTy, type);
-      auto [elementIt, res] = arrayTypeContainer_.insert(
-          {type, std::move(t)});
+      auto [elementIt, res] = arrayTypeContainer_.insert({type, std::move(t)});
       return &elementIt->second;
     } else {
       return &type_it->second;
     }
   }
+
 private:
-  ArrayType(TypeId typeId, Type* containedType) 
+  ArrayType(TypeId typeId, Type *containedType)
       : Type(typeId), containedType_(containedType) {}
 
 public:
-  Type* getArrayElementType() const { return containedType_; }
+  Type *getArrayElementType() const { return containedType_; }
 
 private:
-  Type* containedType_;
+  Type *containedType_;
 };
 
-inline Type* Type::getArrayElementType() const {
-  auto arrType = static_cast<ArrayType const*>(this);
+inline Type *Type::getArrayElementType() const {
+  auto arrType = static_cast<ArrayType const *>(this);
   return arrType->getArrayElementType();
 }
 
 class ClassType final : public Type {
-
-  inline static std::unordered_map<std::string, ClassType> classTypeContainer_;
-
 public:
-  static ClassType* getClassTy(const std::string& name) {
+  static ClassType *getClassTy(const std::string &name) {
+    static std::unordered_map<std::string, ClassType> classTypeContainer_;
     auto type_it = classTypeContainer_.find(name);
     if (type_it == classTypeContainer_.end()) {
       ClassType t(TypeId::ClassTy, name);
-      auto [elementIt, res] = classTypeContainer_.insert(
-          {name, std::move(t)});
+      auto [elementIt, res] = classTypeContainer_.insert({name, std::move(t)});
       return &elementIt->second;
     } else {
       return &type_it->second;
     }
   }
+
 private:
   ClassType(TypeId typeId, std::string className)
       : Type(typeId), className_(std::move(className)) {}
+
 public:
   std::string getClassName() const { return className_; }
+
 private:
   std::string className_;
 };
 
 inline std::string Type::getClassName() const {
-  auto classType = static_cast<ClassType const*>(this);
+  auto classType = static_cast<ClassType const *>(this);
   return classType->getClassName();
 }
 
-
 inline std::string Type::toString() const {
-  Type const* type = this;
+  Type const *type = this;
   std::string suffix;
   if (isArrayTy()) {
     type = getArrayElementType();
     suffix = "[]";
   }
 
-  std::string typeStr = [](Type const* type) -> std::string {
-  	switch(type->getTypeId()) {
-  	case TypeId::BoolTy:
-  		return "bool";
-  	case TypeId::IntTy:
-  		return "int";
-  	case TypeId::CharTy:
-  		return "char";
-  	case TypeId::NullTy:
-  		return "null";
-  	case TypeId::VoidTy:
-  		return "void";
-  	case TypeId::ClassTy:
-  		return static_cast<ClassType const*>(type)->getClassName();
-  	}
-  	return "";
+  std::string typeStr = [](Type const *type) -> std::string {
+    switch (type->getTypeId()) {
+    case TypeId::BoolTy:
+      return "bool";
+    case TypeId::IntTy:
+      return "int";
+    case TypeId::CharTy:
+      return "char";
+    case TypeId::NullTy:
+      return "null";
+    case TypeId::VoidTy:
+      return "void";
+    case TypeId::ClassTy:
+      return static_cast<ClassType const *>(type)->getClassName();
+    default:
+      return "";
+    }
   }(type);
 
   return typeStr + suffix;
