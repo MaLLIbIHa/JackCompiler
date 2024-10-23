@@ -1,4 +1,5 @@
 #pragma once
+#include "compiler/AST2.hpp"
 #include <cctype>
 #include <map>
 #include <string>
@@ -133,30 +134,25 @@ public:
   Token(TokenType tokT, TokenKind kind, std::string value)
       : type_(tokT), kind_(kind), value_(value) {}
 
-  void setLinePos(unsigned int linePos) { linePos_ = linePos; }
+  Token(TokenType tokT, TokenKind kind, std::string value, 
+        SourceLocation srcLoc)
+      : srcLoc_(srcLoc) {}
 
-  void setInLinePos(unsigned int inLinePos) { inLinePos_ = inLinePos; }
-
+  void setSourceLocation(SourceLocation srcLoc) { srcLoc_ = srcLoc; }
   void setValue(std::string val) { value_ = val; }
-
   void setType(TokenType type) { type_ = type; }
-
   void setKind(TokenKind kind) { kind_ = kind; }
 
-  unsigned int getLinePos() { return linePos_; }
-
-  unsigned int getInLinePos() { return inLinePos_; }
-
-  std::string getValue() { return value_; }
-
-  TokenType getType() { return type_; }
-
-  TokenKind getKind() { return kind_; }
+  SourceLocation getSourceLocation() const { return srcLoc_; }
+  unsigned getLinePos() { return srcLoc_.getLinePos(); }
+  unsigned getInLinePos() { return srcLoc_.getInLinePos(); }
+  const std::string& getValue() const { return value_; }
+  TokenType getType() const { return type_; }
+  TokenKind getKind() const { return kind_; }
 
 private:
   std::string value_;
   TokenType type_ = TokenType::EMPTY_TOKEN;
   TokenKind kind_ = TokenKind::NOT_KEYWORD;
-  unsigned int linePos_ = 0;
-  unsigned int inLinePos_ = 0;
+  SourceLocation srcLoc_;
 };

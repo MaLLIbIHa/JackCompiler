@@ -3,11 +3,11 @@
 
 class SourceLocation final {
 public:
+  SourceLocation() = default;
   SourceLocation(unsigned linePos, unsigned inLinePos)
       : linePos_(linePos), inLinePos_(inLinePos) {}
 
   unsigned getLinePos() const { return linePos_; }
-
   unsigned getInLinePos() const { return inLinePos_; }
 
   std::string toStr() const {
@@ -17,6 +17,6 @@ public:
   }
 
 private:
-  unsigned linePos_;
-  unsigned inLinePos_;
+  unsigned linePos_ = 0;
+  unsigned inLinePos_ = 0;
 };

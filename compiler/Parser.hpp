@@ -3,13 +3,12 @@
 #include "Lexer.hpp"
 #include "Token.hpp"
 #include "compiler/ASTContext.hpp"
+#include <iterator>
 
 enum class Associativity {
   LEFT_ASC,
   RIGHT_ASC,
 };
-
-extern std::map<std::string, std::pair<int, Associativity>> opInfo_;
 
 class Parser final {
 public:
@@ -19,54 +18,60 @@ public:
   void parseProgram();
 
 private:
-  std::shared_ptr<ClassDec> parseClass();
+  void parseClass();
 
-  std::shared_ptr<SubroutineDec> parseSubroutineDec(Token subrtnKind);
+  SubroutineDec* parseSubroutineDec();
 
-  std::shared_ptr<SubroutineBody> parseSubroutineBody();
+  SubroutineBody* parseSubroutineBody();
 
-  std::shared_ptr<StatementList> parseStatements();
+  StatementList* parseStatements();
 
   Type *parseType();
 
   Type *parseReturnType();
 
-  void parseVarDec(Token varKind, std::shared_ptr<VariableDecList> vars);
+  void parseVarDec(std::back_insert_iterator<std::vector<VariableDec *>>);
 
   // Statements parsing methods
-  std::shared_ptr<Statement> parseLet();
+  Statement* parseLet();
 
-  std::shared_ptr<Statement> parseIf();
+  Statement* parseIf();
 
-  std::shared_ptr<Statement> parseWhile();
+  Statement* parseWhile();
 
-  std::shared_ptr<Statement> parseDo();
+  Statement* parseDo();
 
-  std::shared_ptr<Statement> parseReturn();
+  Statement* parseReturn();
 
   // Expression parsing methods
-  std::shared_ptr<Expression> parseExpression(int prevPrec = 0);
+  Expression* parseExpression(int = 0);
 
-  std::shared_ptr<Expression> parseTerm();
+  Expression* parseTerm();
 
-  std::shared_ptr<Expression> parseNewArray();
+  Expression* parseNewArray();
 
-  std::shared_ptr<Expression> parseDeleteArray();
+  Expression* parseDeleteArray();
 
-  std::shared_ptr<ExpressionList> parseArgList();
+  std::vector<Expression *> parseArgList();
 
-  std::shared_ptr<Expression>
-  parseCompoundId(std::shared_ptr<Expression> currNode, Token beginTok);
+  Expression*
+  parseCompoundId(Expression* currNode);
 
-  std::shared_ptr<Expression> mkUnopNode(Token op,
-                                         std::shared_ptr<Expression> operand);
+  Expression* createUnopNode(SourceLocation srcLoc, Token opTok,
+                             Expression* operand);
 
-  std::shared_ptr<Expression>
-  mkBinopNode(Token op, std::shared_ptr<Expression> firstOperand,
-              std::shared_ptr<Expression> secondOperand);
+  Expression*
+  createBinopNode(SourceLocation srcLoc, Token opTok, Expression* lhs,
+                  Expression* rhs);
 
-  std::shared_ptr<VariableDec> createVarDecWithMod(std::string name, Type *type,
-                                                   VarModifier mod);
+  SubroutineDec* createSubroutineDec(SourceLocation srcLoc, Token subrtnKind,
+                                     std::string name,
+                                     std::vector<VariableDec *> args,
+                                     Type* retType,
+                                     SubroutineBody* body);
+
+  VariableDec* createVariableDec(std::string name, Type *type,
+                                 VarModifier mod);
 
   // Token stream functions
   bool isType(Token tok);
@@ -87,9 +92,11 @@ private:
 
   Token consume();
 
-  int getPrec(Token tok);
+  const Token& currentToken();
 
-  void setPosition(std::shared_ptr<Node> node, Token tok);
+  bool hasTokens();
+
+  int getPrec(Token tok);
 
   Associativity getAsc(Token tok);
 
@@ -102,12 +109,11 @@ private:
   Type *tokenToLiteralType(Token kind);
 
   // Error output functions
-  void printExpectedErr(TokenKind kind, unsigned linePos, unsigned inLinePos);
+  void printExpectedErr(TokenKind kind, SourceLocation srcLoc);
 
-  void printExpectedErr(TokenType type, unsigned linePos, unsigned inLinePos);
+  void printExpectedErr(TokenType type, SourceLocation srcLoc);
 
-  void printExpectedErr(const char *errMsg, unsigned linePos,
-                        unsigned inLinePos);
+  void printExpectedErr(const char *errMsg, SourceLocation srcLoc);
 
   ASTContext &Ctx_;
   std::unique_ptr<Lexer> lexer_;

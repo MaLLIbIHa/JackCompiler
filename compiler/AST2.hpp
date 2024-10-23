@@ -31,9 +31,8 @@ class Statement : public Node {
 
 class StatementList final : public Node {
 public:
-  StatementList(SourceLocation srcLoc,
-                std::vector<Statement *> stmtList)
-      : Node(srcLoc), statementList_(std::move(stmtList)) {}
+  StatementList(std::vector<Statement *> stmtList)
+      : Node(SourceLocation{}), statementList_(std::move(stmtList)) {}
 
   NodeType getNodeType() const override { return NodeType::STATEMENT_LIST; }
   std::vector<Statement *>::const_iterator begin() const {
@@ -60,25 +59,15 @@ private:
 
 // Expressions
 
-class Expression : public Node {
-public:
-  Expression(SourceLocation srcLoc, Type *evalType,
-             ValueCategory valCateg)
-      : Node(srcLoc), evalType_(evalType), valCateg_(valCateg) {}
-  ValueCategory getValueCategory() const { return valCateg_; }
-  const Type *getEvalType() const { return evalType_; }
-
-private:
-  Type *evalType_;
-  ValueCategory valCateg_;
+class Expression : public Node { 
+  using Node::Node;
 };
 
 class BinopExpr final : public Expression {
 public:
-  BinopExpr(SourceLocation srcLoc, Type *evalType,
-            ValueCategory valCateg, Expression *lhs, Expression *rhs,
+  BinopExpr(SourceLocation srcLoc, Expression *lhs, Expression *rhs,
             OpType operation)
-      : Expression(srcLoc, evalType, valCateg), lhs_(lhs), rhs_(rhs),
+      : Expression(srcLoc), lhs_(lhs), rhs_(rhs),
         op_(operation) {}
 
   NodeType getNodeType() const override { return NodeType::BINOP_EXPR; }
@@ -102,9 +91,8 @@ private:
 
 class UnopExpr final : public Expression {
 public:
-  UnopExpr(SourceLocation srcLoc, Type *evalType,
-           ValueCategory valCateg, Expression *operand, OpType operation)
-      : Expression(srcLoc, evalType, valCateg), operand_(operand),
+  UnopExpr(SourceLocation srcLoc, Expression *operand, OpType operation)
+      : Expression(srcLoc), operand_(operand),
         op_(operation) {}
 
   NodeType getNodeType() const override { return NodeType::UNOP_EXPR; }
@@ -124,10 +112,9 @@ private:
 
 class NewArrayExpr final : public Expression {
 public:
-  NewArrayExpr(SourceLocation srcLoc, Type *evalType,
-               ValueCategory valCateg, Type *arrayElemType,
+  NewArrayExpr(SourceLocation srcLoc, Type *arrayElemType,
                Expression *sizeExpr)
-      : Expression(srcLoc, evalType, valCateg),
+      : Expression(srcLoc),
         arrayElemType_(arrayElemType), sizeExpr_(sizeExpr) {}
 
   NodeType getNodeType() const override { return NodeType::NEW_ARRAY_EXPR; }
@@ -147,9 +134,8 @@ private:
 
 class DeleteArrayExpr final : public Expression {
 public:
-  DeleteArrayExpr(SourceLocation srcLoc, Type *evalType,
-                  ValueCategory valCateg, Expression *arrayExpr)
-      : Expression(srcLoc, evalType, valCateg), arrayExpr_(arrayExpr) {}
+  DeleteArrayExpr(SourceLocation srcLoc, Expression *arrayExpr)
+      : Expression(srcLoc), arrayExpr_(arrayExpr) {}
 
   NodeType getNodeType() const override { return NodeType::DELETE_ARRAY_EXPR; }
   const Expression *getArrayExpr() const { return arrayExpr_; }
@@ -166,13 +152,13 @@ private:
 
 class LiteralExpr final : public Expression {
 public:
-  LiteralExpr(SourceLocation srcLoc, Type *evalType,
-              ValueCategory valCateg, std::string value)
-      : Expression(srcLoc, evalType, valCateg),
-        value_(std::move(value)) {}
+  LiteralExpr(SourceLocation srcLoc, std::string value, Type* type)
+      : Expression(srcLoc),
+        value_(std::move(value)), type_(type) {}
 
   NodeType getNodeType() const override { return NodeType::LITERAL_EXPR; }
   const std::string &getValue() const { return value_; }
+  const Type* getType() const { return type_; }
 
   void accept(Visitor &v) const override {
     v.preVisit(this);
@@ -181,13 +167,13 @@ public:
 
 private:
   std::string value_;
+  Type* type_;
 };
 
 class NameExpr final : public Expression {
 public:
-  NameExpr(SourceLocation srcLoc, Type *evalType,
-           ValueCategory valCateg, std::string name)
-      : Expression(srcLoc, evalType, valCateg), name_(std::move(name)) {
+  NameExpr(SourceLocation srcLoc, std::string name)
+      : Expression(srcLoc), name_(std::move(name)) {
   }
 
   NodeType getNodeType() const override { return NodeType::NAME_EXPR; }
@@ -204,10 +190,9 @@ private:
 
 class ArrayMemberExpr final : public Expression {
 public:
-  ArrayMemberExpr(SourceLocation srcLoc, Type *evalType,
-                  ValueCategory valCateg, Expression *arrayExpr,
+  ArrayMemberExpr(SourceLocation srcLoc, Expression *arrayExpr,
                   Expression *indexExpr)
-      : Expression(srcLoc, evalType, valCateg), arrayExpr_(arrayExpr),
+      : Expression(srcLoc), arrayExpr_(arrayExpr),
         indexExpr_(indexExpr) {}
 
   NodeType getNodeType() const override { return NodeType::ARRAY_MEMBER_EXPR; }
@@ -229,10 +214,9 @@ private:
 
 class CallExpr final : public Expression {
 public:
-  CallExpr(SourceLocation srcLoc, Type *evalType,
-           ValueCategory valCateg, Expression *subroutineExpr,
+  CallExpr(SourceLocation srcLoc, Expression *subroutineExpr,
            std::vector<Expression *> args)
-      : Expression(srcLoc, evalType, valCateg), args_(std::move(args)),
+      : Expression(srcLoc), args_(std::move(args)),
         subroutineExpr_(subroutineExpr) {}
 
   NodeType getNodeType() const override { return NodeType::CALL_EXPR; }
@@ -255,9 +239,8 @@ private:
 
 class MemberExpr final : public Expression {
 public:
-  MemberExpr(SourceLocation srcLoc, Type *evalType,
-             ValueCategory valCateg, std::string member, Expression *identifier)
-      : Expression(srcLoc, evalType, valCateg),
+  MemberExpr(SourceLocation srcLoc, Expression *identifier, std::string member)
+      : Expression(srcLoc),
         member_(std::move(member)), identifier_(identifier) {}
 
   NodeType getNodeType() const override { return NodeType::MEMBER_EXPR; }
@@ -354,11 +337,11 @@ private:
 
 class DoStatement final : public Statement {
 public:
-  DoStatement(SourceLocation srcLoc, CallExpr *callExpr)
+  DoStatement(SourceLocation srcLoc, Expression* callExpr)
       : Statement(srcLoc), callExpr_(callExpr) {}
 
   NodeType getNodeType() const override { return NodeType::DO_STATEMENT; }
-  const CallExpr *getCallExpr() const { return callExpr_; }
+  const Expression* getCallExpr() const { return callExpr_; }
 
   void accept(Visitor &v) const override {
     v.preVisit(this);
@@ -367,7 +350,25 @@ public:
   }
 
 private:
-  CallExpr *callExpr_;
+  Expression* callExpr_;
+};
+
+class ReturnStatement final : public Statement {
+public:
+  ReturnStatement(SourceLocation srcLoc, Expression* returnExpr)
+    : Statement(srcLoc), returnExpr_(returnExpr) {}
+
+  NodeType getNodeType() const override { return NodeType::RETURN_STATEMENT; }
+  Expression* getReturnExpr() const { return returnExpr_; }
+
+  void accept(Visitor &v) const override {
+    v.preVisit(this);
+    returnExpr_->accept(v);
+    v.postVisit(this);
+  }
+
+private:
+  Expression* returnExpr_;
 };
 
 // Variable Decls
@@ -435,7 +436,7 @@ public:
 
 class SubroutineBody final : public Node {
 public:
-  SubroutineBody(SourceLocation srcLoc, Node *parent,
+  SubroutineBody(SourceLocation srcLoc,
                  std::vector<LocalVarDec *> localVars,
                  StatementList *statements)
       : Node(srcLoc), localVarList_(std::move(localVars)),
@@ -470,18 +471,18 @@ private:
 class SubroutineDec : public Node {
 public:
   SubroutineDec(SourceLocation srcLoc, std::string name,
-                std::vector<ArgumentVarDec *> args, Type *retType,
-                SubroutineBody *body)
+                std::vector<VariableDec *> args, Type *retType,
+                SubroutineBody* body)
       : Node(srcLoc), name_(std::move(name)), args_(std::move(args)),
         retType_(retType), body_(body) {}
 
   const std::string &getName() const { return name_; }
   const Type *getReturnType() const { return retType_; }
   const SubroutineBody *getSubroutineBody() const { return body_; }
-  std::vector<ArgumentVarDec *>::const_iterator args_begin() const {
+  std::vector<VariableDec *>::const_iterator args_begin() const {
     return args_.cbegin();
   }
-  std::vector<ArgumentVarDec *>::const_iterator args_end() const {
+  std::vector<VariableDec *>::const_iterator args_end() const {
     return args_.cend();
   }
 
@@ -493,7 +494,7 @@ public:
 
   void acceptOnChildren(Visitor &v) const {
     unsigned int visitCount = 1;
-    for (ArgumentVarDec *arg : args_) {
+    for (VariableDec *arg : args_) {
       arg->accept(v);
       v.interVisit(this, visitCount);
       visitCount++;
@@ -503,7 +504,7 @@ public:
 
 private:
   std::string name_;
-  std::vector<ArgumentVarDec *> args_;
+  std::vector<VariableDec *> args_;
   Type *retType_;
   SubroutineBody *body_;
 };

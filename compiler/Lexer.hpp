@@ -1,11 +1,8 @@
 #pragma once
 #include "Token.hpp"
+#include "compiler/AST2.hpp"
 #include <algorithm>
-#include <exception>
 #include <iostream>
-#include <iterator>
-#include <memory>
-#include <vector>
 
 class Lexer final {
 public:
@@ -22,7 +19,7 @@ public:
     return tmp;
   }
 
-  Token currentToken() { return currentToken_; }
+  const Token& currentToken() { return currentToken_; }
 
   void printTokens() {
     while (hasTokens()) {
@@ -43,8 +40,7 @@ private:
       return Token(TokenType::TEOF, TokenKind::NOT_KEYWORD, "");
     }
 
-    unsigned tokenLinePos = currentLinePos_;
-    unsigned tokenInLinePos = currentInLinePos_;
+    SourceLocation srcLoc(currentLinePos_, currentInLinePos_);
     Token tok;
     char currentChar = *iter_;
     if (currentChar == '\"') {
@@ -68,8 +64,7 @@ private:
       }
     }
     skipSpacesAndComments();
-    tok.setLinePos(tokenLinePos);
-    tok.setInLinePos(tokenInLinePos);
+    tok.setSourceLocation(srcLoc);
     return tok;
   }
 
