@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(JackCompiler)
 
-add_subdirectory(deps/llvm-19.1.2.src)
+find_package(LLVM REQUIRED CONFIG)
+add_subdirectory(deps)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -23,3 +24,4 @@ llvm_map_components_to_libnames(llvm_libs support core irreader)
 
 # Link against LLVM libraries
 target_link_libraries(${PROJECT_NAME} ${llvm_libs})
+add_subdirectory(tests)
