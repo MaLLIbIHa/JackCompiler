@@ -5,12 +5,6 @@
 #include "compiler/Visitor.hpp"
 #include <vector>
 
-enum class ValueCategory {
-  NOT_VALUE,
-  LVALUE,
-  RVALUE,
-};
-
 // Main base class
 class Node {
 public:
@@ -66,14 +60,14 @@ class Expression : public Node {
 class BinopExpr final : public Expression {
 public:
   BinopExpr(SourceLocation srcLoc, Expression *lhs, Expression *rhs,
-            OpType operation)
+            BinopType operation)
       : Expression(srcLoc), lhs_(lhs), rhs_(rhs),
         op_(operation) {}
 
   NodeType getNodeType() const override { return NodeType::BINOP_EXPR; }
   const Expression *getLhsOperand() const { return lhs_; }
   const Expression *getRhsOperand() const { return rhs_; }
-  OpType getOpType() const { return op_; }
+  BinopType getOpType() const { return op_; }
 
   void accept(Visitor &v) const override {
     v.preVisit(this);
@@ -86,18 +80,18 @@ public:
 private:
   Expression *lhs_;
   Expression *rhs_;
-  OpType op_;
+  BinopType op_;
 };
 
 class UnopExpr final : public Expression {
 public:
-  UnopExpr(SourceLocation srcLoc, Expression *operand, OpType operation)
+  UnopExpr(SourceLocation srcLoc, Expression *operand, UnopType operation)
       : Expression(srcLoc), operand_(operand),
         op_(operation) {}
 
   NodeType getNodeType() const override { return NodeType::UNOP_EXPR; }
   const Expression *getOperand() const { return operand_; }
-  OpType getOpType() const { return op_; }
+  UnopType getOpType() const { return op_; }
 
   void accept(Visitor &v) const override {
     v.preVisit(this);
@@ -107,7 +101,7 @@ public:
 
 private:
   Expression *operand_;
-  OpType op_;
+  UnopType op_;
 };
 
 class NewArrayExpr final : public Expression {
@@ -221,6 +215,7 @@ public:
 
   NodeType getNodeType() const override { return NodeType::CALL_EXPR; }
   const Expression *getSubroutineExpr() const { return subroutineExpr_; }
+  const unsigned getArgsCount() const { return args_.size(); }
   std::vector<Expression *>::const_iterator args_begin() {
     return args_.cbegin();
   }
@@ -300,8 +295,10 @@ public:
     condition_->accept(v);
     v.interVisit(this, 1);
     ifBody_->accept(v);
-    v.interVisit(this, 2);
-    elseBody_->accept(v);
+    if (elseBody_ != nullptr) {
+      v.interVisit(this, 2);
+      elseBody_->accept(v);
+    }
     v.postVisit(this);
   }
 
@@ -437,24 +434,24 @@ public:
 class SubroutineBody final : public Node {
 public:
   SubroutineBody(SourceLocation srcLoc,
-                 std::vector<LocalVarDec *> localVars,
+                 std::vector<VariableDec *> localVars,
                  StatementList *statements)
       : Node(srcLoc), localVarList_(std::move(localVars)),
         statementList_(statements) {}
 
   NodeType getNodeType() const override { return NodeType::SUBRTN_BODY; }
   const StatementList *getStatmentList() const { return statementList_; }
-  std::vector<LocalVarDec *>::const_iterator locals_begin() const {
+  std::vector<VariableDec *>::const_iterator locals_begin() const {
     return localVarList_.cbegin();
   }
-  std::vector<LocalVarDec *>::const_iterator locals_end() const {
+  std::vector<VariableDec *>::const_iterator locals_end() const {
     return localVarList_.cend();
   }
 
   void accept(Visitor &v) const override {
     v.preVisit(this);
     unsigned int visitCount = 1;
-    for (LocalVarDec *local : localVarList_) {
+    for (VariableDec *local : localVarList_) {
       local->accept(v);
       v.interVisit(this, visitCount);
       visitCount++;
@@ -464,7 +461,7 @@ public:
   }
 
 private:
-  std::vector<LocalVarDec *> localVarList_;
+  std::vector<VariableDec *> localVarList_;
   StatementList *statementList_;
 };
 

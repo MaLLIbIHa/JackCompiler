@@ -1,453 +1,290 @@
 #pragma once
-#include "AST.hpp"
+#include "AST2.hpp"
 #include "Visitor.hpp"
-#include <fstream>
-#include <memory>
+#include "compiler/NodeDescriptors.hpp"
+#include <cassert>
 
 class PrintVisitor final : public Visitor {
 public:
-  PrintVisitor() = default;
-  PrintVisitor(int indentDiff) : indentDiff_(indentDiff) {}
+  PrintVisitor(int indentDiff, std::ostream& outStream)
+    : indentDiff_(indentDiff), output_(outStream) {}
 
 private:
-  void preVisit(Program *prog) override {
-    std::cout << opentag("program") << std::endl;
+  void preVisit(const Program *prog) override {
+    output_ << opentag("program") << std::endl;
   }
-  void postVisit(Program *prog) override {
-    std::cout << closetag("program") << std::endl;
+  void postVisit(const Program *prog) override {
+    output_ << closetag("program") << std::endl;
   }
 
-  void preVisit(FileUnit *fileUnit) override {
-    std::cout << opentagWithIncIndent("fileUnit");
+  void preVisit(const ClassDec *cl) override {
+    output_ << opentagWithIncIndent("class");
     incIndent();
-    std::cout << onelinetagWithIndent("name", fileUnit->getFileName());
+    output_ << onelinetagWithIndent("name", cl->getName());
     decIndent();
   }
-  void postVisit(FileUnit *fileUnit) override {
-    std::cout << closetagWithDecIndent("fileUnit");
+  void postVisit(const ClassDec *cl) override {
+    output_ << closetagWithDecIndent("class");
   }
 
-  void preVisit(ClassDec *cl) override {
-    std::cout << opentagWithIncIndent("class");
-    incIndent();
-    std::cout << onelinetagWithIndent("name", cl->getName());
-    decIndent();
+  void preVisit(const ArgumentVarDec* varDec) override {
+    printVariableDec("argumentVariableDeclaration", varDec);
   }
-  void postVisit(ClassDec *cl) override {
-    std::cout << closetagWithDecIndent("class");
+  void postVisit(const ArgumentVarDec*) override {
+    output_ << closetagWithDecIndent("argumentVariableDeclaration");
   }
 
-  void preVisit(FieldVariableList *varList) override {
-    std::cout << opentagWithIncIndent("fieldVariableList");
+  void preVisit(const LocalVarDec* varDec) override {
+    printVariableDec("localVariableDeclaration", varDec);
   }
-  void postVisit(FieldVariableList *varList) override {
-    std::cout << closetagWithDecIndent("fieldVariableList");
-  }
-
-  void preVisit(StaticVariableList *varList) override {
-    std::cout << opentagWithIncIndent("staticVariableList");
-  }
-  void postVisit(StaticVariableList *varList) override {
-    std::cout << closetagWithDecIndent("staticVariableList");
+  void postVisit(const LocalVarDec*) override {
+    output_ << closetagWithDecIndent("localVariableDeclaration");
   }
 
-  void preVisit(SubroutineArgumentList *varList) override {
-    std::cout << opentagWithIncIndent("subroutineArgumentList");
+  void preVisit(const FieldVarDec* varDec) override {
+    printVariableDec("fieldVariableDeclaration", varDec);
   }
-  void postVisit(SubroutineArgumentList *varList) override {
-    std::cout << closetagWithDecIndent("subroutineArgumentList");
-  }
-
-  void preVisit(LocalVariableList *varList) override {
-    std::cout << opentagWithIncIndent("LocalVariableList");
-  }
-  void postVisit(LocalVariableList *varList) override {
-    std::cout << closetagWithDecIndent("LocalVariableList");
+  void postVisit(const FieldVarDec*) override {
+    output_ << closetagWithDecIndent("fieldVariableDeclaration");
   }
 
-  void preVisit(ArgumentVarDec *var) override {
-    std::string kind;
-    std::string varTypeStr = typeToStr(var->getVarType());
-    std::cout << opentagWithIncIndent("argumentVariableDeclaration");
-    incIndent();
-    std::cout << onelinetagWithIndent("name", var->getVarName());
-    std::cout << onelinetagWithIndent("type", varTypeStr);
-    decIndent();
+  void preVisit(const StaticVarDec* varDec) override {
+    printVariableDec("staticVariableDeclaration", varDec);
   }
-  void postVisit(ArgumentVarDec *var) override {
-    std::cout << closetagWithDecIndent("argumentVariableDeclaration");
+  void postVisit(const StaticVarDec*) override {
+    output_ << closetagWithDecIndent("staticVariableDeclaration");
   }
 
-  void preVisit(LocalVarDec *var) override {
-    std::string kind;
-    std::string varTypeStr = typeToStr(var->getVarType());
-    std::cout << opentagWithIncIndent("localVariableDeclaration");
-    incIndent();
-    std::cout << onelinetagWithIndent("name", var->getVarName());
-    std::cout << onelinetagWithIndent("type", varTypeStr);
-    decIndent();
+  void preVisit(const SubroutineList *subList) override {
+    output_ << opentagWithIncIndent("subroutineList");
   }
-  void postVisit(LocalVarDec *var) override {
-    std::cout << closetagWithDecIndent("localVariableDeclaration");
+  void postVisit(const SubroutineList *subList) override {
+    output_ << closetagWithDecIndent("subroutineList");
   }
 
-  void preVisit(FieldVarDec *var) override {
-    std::string kind;
-    std::string varTypeStr = typeToStr(var->getVarType());
-    std::cout << opentagWithIncIndent("fieldVariableDeclaration");
-    incIndent();
-    std::cout << onelinetagWithIndent("name", var->getVarName());
-    std::cout << onelinetagWithIndent("type", varTypeStr);
-    decIndent();
-  }
-  void postVisit(FieldVarDec *var) override {
-    std::cout << closetagWithDecIndent("fieldVariableDeclaration");
-  }
-
-  void preVisit(StaticVarDec *var) override {
-    std::string kind;
-    std::string varTypeStr = typeToStr(var->getVarType());
-    std::cout << opentagWithIncIndent("staticVariableDeclaration");
-    incIndent();
-    std::cout << onelinetagWithIndent("name", var->getVarName());
-    std::cout << onelinetagWithIndent("type", varTypeStr);
-    decIndent();
-  }
-  void postVisit(StaticVarDec *var) override {
-    std::cout << closetagWithDecIndent("staticVariableDeclaration");
-  }
-
-  void preVisit(SubroutineList *subList) override {
-    std::cout << opentagWithIncIndent("subroutineList");
-  }
-  void postVisit(SubroutineList *subList) override {
-    std::cout << closetagWithDecIndent("subroutineList");
-  }
-
-  void preVisit(SubroutineDec *sub) override {
-    std::string subrtnType;
-    std::string retTypeStr = typeToStr(sub->getRetType());
-    switch (sub->getSubroutineKind()) {
-    case SubroutineKind::FUNCTION_S:
-      subrtnType = "function";
-      break;
-    case SubroutineKind::METHOD_S:
-      subrtnType = "method";
-      break;
-    case SubroutineKind::CONSTRUCTOR_S:
-      subrtnType = "constructor";
-      break;
-    }
-    std::cout << opentagWithIncIndent("subroutineDeclaration");
-    incIndent();
-    std::cout << onelinetagWithIndent("name", sub->getName());
-    std::cout << onelinetagWithIndent("returnType", retTypeStr);
-    std::cout << onelinetagWithIndent("kind", subrtnType);
-    decIndent();
-  }
-  void postVisit(SubroutineDec *sub) override {
-    std::cout << closetagWithDecIndent("subroutineDeclaration");
-  }
-
-  void preVisit(SubroutineBody *subBody) override {
-    std::cout << opentagWithIncIndent("subroutineBody");
-  }
-  void postVisit(SubroutineBody *subBody) override {
-    std::cout << closetagWithDecIndent("subroutineBody");
-  }
-
-  void preVisit(StatementList *stmtList) override {
-    std::cout << opentagWithIncIndent("statementList");
-  }
-  void postVisit(StatementList *stmtList) override {
-    std::cout << closetagWithDecIndent("statementList");
-  }
-
-  void preVisit(LetStatement *letStmt) override {
-    std::cout << opentagWithIncIndent("letStatement");
-  }
-  void postVisit(LetStatement *letStmt) override {
-    std::cout << closetagWithDecIndent("letStatement");
-  }
-
-  void preVisit(IfStatement *ifStmt) override {
-    std::cout << opentagWithIncIndent("ifStatement");
-  }
-  void postVisit(IfStatement *ifStmt) override {
-    std::cout << closetagWithDecIndent("ifStatement");
-  }
-
-  void preVisit(WhileStatement *whileStmt) override {
-    std::cout << opentagWithIncIndent("whileStatement");
-  }
-  void postVisit(WhileStatement *whileStmt) override {
-    std::cout << closetagWithDecIndent("whileStatement");
-  }
-
-  void preVisit(DoStatement *doStmt) override {
-    std::cout << opentagWithIncIndent("doStatement");
-  }
-  void postVisit(DoStatement *doStmt) override {
-    std::cout << closetagWithDecIndent("doStatement");
-  }
-
-  void preVisit(ReturnStatement *retStmt) override {
-    std::cout << opentagWithIncIndent("retStatement");
-  }
-  void postVisit(ReturnStatement *retStmt) override {
-    std::cout << closetagWithDecIndent("retStatement");
-  }
-
-  void preVisit(ExpressionList *exprList) override {
-    std::cout << opentagWithIncIndent("expressionList");
-  }
-  void postVisit(ExpressionList *exprList) override {
-    std::cout << closetagWithDecIndent("expressionList");
-  }
-
-  void preVisit(BinopExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    std::string op = convertOpType(expr->getOpType());
-    std::cout << opentagWithIncIndent("binaryOperation");
-    incIndent();
-    std::cout << onelinetagWithIndent("operation", op);
-    decIndent();
-  }
-  void postVisit(BinopExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::cout << closetagWithDecIndent("binaryOperation");
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(UnopExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    std::string op = convertOpType(expr->getOpType());
-    std::cout << opentagWithIncIndent("unaryOperation");
-    incIndent();
-    std::cout << onelinetagWithIndent("operation", op);
-    decIndent();
-  }
-  void postVisit(UnopExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::cout << closetagWithDecIndent("unaryOperation");
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(NewArrayExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::string arrayType = typeToStr(expr->getArrayType());
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    std::cout << opentagWithIncIndent("newArrayCall");
-    incIndent();
-    std::cout << onelinetagWithIndent("type", arrayType);
-    decIndent();
-  }
-  void postVisit(NewArrayExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::cout << closetagWithDecIndent("newArrayCall");
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(DeleteArrayExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    std::cout << opentagWithIncIndent("deleteArrayCall");
-  }
-  void postVisit(DeleteArrayExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::cout << closetagWithDecIndent("newArrayCall");
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(LiteralExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::string data = expr->getValue();
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    incIndent();
-    std::cout << onelinetagWithIndent("literal", data);
-    decIndent();
-  }
-  void postVisit(LiteralExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(NameExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::string data = expr->getName();
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    incIndent();
-    std::cout << onelinetagWithIndent("name", data);
-    decIndent();
-  }
-  void postVisit(NameExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(ArrayMemberExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    std::cout << opentagWithIncIndent("arrayMemberExpression");
-  }
-  void postVisit(ArrayMemberExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::cout << closetagWithDecIndent("arrayMemberExpression");
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(SubroutineCallExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    std::cout << opentagWithIncIndent("callExpression");
-  }
-  void postVisit(SubroutineCallExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    std::cout << closetagWithDecIndent("callExpression");
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  void preVisit(MemberExpr *expr) override {
-    std::string exprKind = checkexprKind(expr);
-    if (!exprKind.empty()) {
-      std::cout << opentagWithIncIndent(exprKind);
-    }
-    std::cout << opentagWithIncIndent("memberExpression");
-  }
-  void postVisit(MemberExpr *expr) override {
-    incIndent();
-    std::cout << onelinetagWithIndent("member", expr->getMember());
-    decIndent();
-    std::string exprKind = checkexprKind(expr);
-    std::cout << closetagWithDecIndent("memberExpression");
-    if (!exprKind.empty()) {
-      std::cout << closetagWithDecIndent(exprKind);
-    }
-  }
-
-  std::string checkexprKind(Expression *expr) {
-    NodeType stmtType = expr->getParent()->getNodeType();
-    std::string exprKind;
-    switch (stmtType) {
-    case NodeType::IF_STATEMENT:
-    case NodeType::WHILE_STATEMENT:
-      exprKind = "condition";
-      break;
-
-    case NodeType::LET_STATEMENT:
-      if (expr->getParent()->child(0).get() == expr) {
-        exprKind = "leftExpression";
-      } else {
-        exprKind = "rightExpression";
+  void preVisit(const SubroutineDec *sub) override {
+    std::string retTypeStr = sub->getReturnType()->toString();
+    std::string subrtnType = [](NodeType nodeType) {
+      switch (nodeType) {
+      case NodeType::FUNCTION_DEC:
+        return "function";
+      case NodeType::METHOD_DEC:
+        return "method";
+      case NodeType::CONSTRUCTOR_DEC:
+        return "constructor";
+      default:
+        assert(false && "unreachable");
       }
-      break;
-
-    case NodeType::BINOP_EXPR:
-      if (expr->getParent()->child(0).get() == expr) {
-        exprKind = "leftOperand";
-      } else {
-        exprKind = "rightOperand";
-      }
-      break;
-
-    case NodeType::ARRAY_MEMBER_EXPR:
-      if (expr->getParent()->child(0).get() == expr) {
-        exprKind = "identifier";
-      } else {
-        exprKind = "indexExpression";
-      }
-      break;
-
-    case NodeType::MEMBER_EXPR:
-      exprKind = "identifier";
-      break;
-
-    default:
-      return std::string{};
-    }
-    return exprKind;
+    }(sub->getNodeType());
+    output_ << opentagWithIncIndent("subroutineDeclaration");
+    incIndent();
+    output_ << onelinetagWithIndent("name", sub->getName());
+    output_ << onelinetagWithIndent("returnType", retTypeStr);
+    output_ << onelinetagWithIndent("kind", subrtnType);
+    decIndent();
+  }
+  void postVisit(const SubroutineDec *sub) override {
+    output_ << closetagWithDecIndent("subroutineDeclaration");
   }
 
-  std::string typeToStr(Type *type) { return type->toString(); }
+  void preVisit(const SubroutineBody *subBody) override {
+    output_ << opentagWithIncIndent("subroutineBody");
+  }
+  void postVisit(const SubroutineBody *subBody) override {
+    output_ << closetagWithDecIndent("subroutineBody");
+  }
 
-  std::string convertOpType(OpType type) {
-    std::string op;
+  void preVisit(const StatementList *stmtList) override {
+    output_ << opentagWithIncIndent("statementList");
+  }
+  void postVisit(const StatementList *stmtList) override {
+    output_ << closetagWithDecIndent("statementList");
+  }
+
+  void preVisit(const LetStatement* letStmt) override {
+    output_ << opentagWithIncIndent("letStatement");
+    output_ << opentagWithIncIndent("left");
+  }
+  void interVisit(const LetStatement* letStmt, unsigned) override {
+    output_ << closetagWithDecIndent("left");
+    output_ << opentagWithIncIndent("right");
+  }
+  void postVisit(const LetStatement *letStmt) override {
+    output_ << closetagWithDecIndent("right");
+    output_ << closetagWithDecIndent("letStatement");
+  }
+
+  void preVisit(const IfStatement* ifStmt) override {
+    output_ << opentagWithIncIndent("ifStatement");
+    output_ << opentagWithIncIndent("condition");
+  }
+  void interVisit(const IfStatement* ifStmt, unsigned visitCount) override {
+    if (visitCount == 1) {
+      output_ << closetagWithDecIndent("condition");
+      output_ << opentagWithIncIndent("ifBody");
+    } else if (visitCount == 2) {
+      output_ << closetagWithDecIndent("ifBody");
+      if (ifStmt->getElseBody() != nullptr) {
+        output_ << opentagWithIncIndent("elseBody");
+      }
+    }
+  }
+  void postVisit(const IfStatement* ifStmt) override {
+    if (ifStmt->getElseBody() == nullptr)
+      output_ << closetagWithDecIndent("ifBody");
+    else
+      output_ << closetagWithDecIndent("elseBody");
+    output_ << closetagWithDecIndent("ifStatement");
+  }
+
+  void preVisit(const WhileStatement* whileStmt) override {
+    output_ << opentagWithIncIndent("whileStatement");
+    output_ << opentagWithIncIndent("condition");
+  }
+  void interVisit(const WhileStatement* whileStmt,
+                  unsigned visitCount) override {
+    output_ << closetagWithDecIndent("condition");
+    output_ << opentagWithIncIndent("whileBody");
+  }
+  void postVisit(const WhileStatement *whileStmt) override {
+    output_ << closetagWithDecIndent("whileBody");
+    output_ << closetagWithDecIndent("whileStatement");
+  }
+
+  void preVisit(const DoStatement *doStmt) override {
+    output_ << opentagWithIncIndent("doStatement");
+  }
+  void postVisit(const DoStatement *doStmt) override {
+    output_ << closetagWithDecIndent("doStatement");
+  }
+
+  void preVisit(const ReturnStatement *retStmt) override {
+    output_ << opentagWithIncIndent("retStatement");
+  }
+  void postVisit(const ReturnStatement *retStmt) override {
+    output_ << closetagWithDecIndent("retStatement");
+  }
+
+  void preVisit(const BinopExpr* expr) override {
+    output_ << opentagWithIncIndent("binaryOperation");
+  }
+  void interVisit(const BinopExpr* expr, unsigned) override {
+    std::string op = binopTypeToString(expr->getOpType());
+    incIndent();
+    output_ << onelinetagWithIndent("operation", op);
+    decIndent();
+  }
+  void postVisit(const BinopExpr *expr) override {
+    output_ << closetagWithDecIndent("binaryOperation");
+  }
+
+  void preVisit(const UnopExpr *expr) override {
+    std::string op = unopTypeToString(expr->getOpType());
+    output_ << opentagWithIncIndent("unaryOperation");
+    incIndent();
+    output_ << onelinetagWithIndent("operation", op);
+    decIndent();
+  }
+  void postVisit(const UnopExpr *expr) override {
+    output_ << closetagWithDecIndent("unaryOperation");
+  }
+
+  void preVisit(const NewArrayExpr *expr) override {
+    std::string arrayType = expr->getArrayElemType()->toString();
+    output_ << opentagWithIncIndent("newArrayCall");
+    incIndent();
+    output_ << onelinetagWithIndent("type", arrayType);
+    decIndent();
+  }
+  void postVisit(const NewArrayExpr *expr) override {
+    output_ << closetagWithDecIndent("newArrayCall");
+  }
+
+  void preVisit(const DeleteArrayExpr *expr) override {
+    output_ << opentagWithIncIndent("deleteArrayCall");
+  }
+  void postVisit(const DeleteArrayExpr *expr) override {
+    output_ << closetagWithDecIndent("deleteArrayCall");
+  }
+
+  void preVisit(const LiteralExpr *expr) override {
+    incIndent();
+    output_ << onelinetagWithIndent("literal", expr->getValue());
+    decIndent();
+  }
+
+  void preVisit(const NameExpr *expr) override {
+    incIndent();
+    output_ << onelinetagWithIndent("name", expr->getName());
+    decIndent();
+  }
+
+  void preVisit(const ArrayMemberExpr *expr) override {
+    output_ << opentagWithIncIndent("arrayMemberExpression");
+  }
+  void postVisit(const ArrayMemberExpr *expr) override {
+    output_ << closetagWithDecIndent("arrayMemberExpression");
+  }
+
+  void preVisit(const CallExpr *expr) override {
+    output_ << opentagWithIncIndent("callExpression");
+  }
+  void postVisit(const CallExpr *expr) override {
+    output_ << closetagWithDecIndent("callExpression");
+  }
+
+  void preVisit(const MemberExpr *expr) override {
+    output_ << opentagWithIncIndent("memberExpression");
+  }
+  void postVisit(const MemberExpr *expr) override {
+    incIndent();
+    output_ << onelinetagWithIndent("member", expr->getMember());
+    decIndent();
+  }
+
+  void printVariableDec(std::string tag, const VariableDec* varDec) {
+    std::string varTypeStr = varDec->getVarType()->toString();
+    output_ << opentagWithIncIndent(tag);
+    incIndent();
+    output_ << onelinetagWithIndent("name", varDec->getVarName());
+    output_ << onelinetagWithIndent("type", varTypeStr);
+    decIndent();
+  }
+
+  std::string binopTypeToString(BinopType type) {
     switch (type) {
-    case OpType::ADD_OP:
-      op = "+";
-      break;
-    case OpType::SUB_OP:
-      op = "-";
-      break;
-    case OpType::MUL_OP:
-      op = "*";
-      break;
-    case OpType::DIV_OP:
-      op = "/";
-      break;
-    case OpType::LOG_AND_OP:
-      op = "&&";
-      break;
-    case OpType::LOG_OR_OP:
-      op = "||";
-      break;
-    case OpType::BIT_AND_OP:
-      op = "&";
-      break;
-    case OpType::BIT_OR_OP:
-      op = "|";
-      break;
-    case OpType::LSS_OP:
-      op = "<";
-      break;
-    case OpType::GTR_OP:
-      op = ">";
-      break;
-    case OpType::EQL_OP:
-      op = "==";
-      break;
-    case OpType::NEG_OP:
-      op = "-";
-      break;
-    case OpType::TILDE_OP:
-      op = "~";
-      break;
+    case BinopType::ADD_OP:
+      return "+";
+    case BinopType::SUB_OP:
+      return "-";
+    case BinopType::MUL_OP:
+      return "*";
+    case BinopType::DIV_OP:
+      return "/";
+    case BinopType::LOG_AND_OP:
+      return "&&";
+    case BinopType::LOG_OR_OP:
+      return "||";
+    case BinopType::BIT_AND_OP:
+      return "&";
+    case BinopType::BIT_OR_OP:
+      return "|";
+    case BinopType::LSS_OP:
+      return "<";
+    case BinopType::GTR_OP:
+      return ">";
+    case BinopType::EQL_OP:
+      return "==";
     }
-    return op;
+  }
+
+  std::string unopTypeToString(UnopType type) {
+    switch(type) {
+    case UnopType::NEG_OP:
+      return "-";
+    case UnopType::NOT_OP:
+      return "~";
+    }
   }
 
   void incIndent() {
@@ -480,7 +317,7 @@ private:
 
   std::string closetag(std::string tagName) { return "</" + tagName + ">"; }
 
-  std::ofstream output_;
+  std::ostream& output_;
   std::string currentIndent_;
   unsigned int indentSize_ = 0;
   unsigned int indentDiff_ = 2;

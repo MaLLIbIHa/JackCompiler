@@ -2,13 +2,23 @@
 #include "Token.hpp"
 #include "compiler/AST2.hpp"
 #include <algorithm>
+#include <concepts>
 #include <iostream>
+#include <istream>
+#include <ostream>
+
+template<typename T>
+concept InputStreamWithUnget = requires(T stream) {
+  { stream.get() } -> std::convertible_to<char>;
+  { stream.peek() } -> std::convertible_to<char>;
+  stream.unget();
+  { stream.eof() } -> std::convertible_to<bool>;
+};
 
 class Lexer final {
 public:
-  Lexer(std::string sourceText)
-      : sourceText_(sourceText), iter_(sourceText_.begin()),
-        endIter_(sourceText_.end()) {
+  Lexer(std::istream& inputStream)
+      : inputStream_(inputStream) {
     skipSpacesAndComments();
     currentToken_ = getToken();
   }
@@ -36,13 +46,13 @@ public:
 
 private:
   Token getToken() {
-    if (iter_ == endIter_) {
-      return Token(TokenType::TEOF, TokenKind::NOT_KEYWORD, "");
-    }
-
     SourceLocation srcLoc(currentLinePos_, currentInLinePos_);
+    if (isEof()) {
+      return Token(TokenType::TEOF, TokenKind::NOT_KEYWORD, "", srcLoc);
+    }
+    
     Token tok;
-    char currentChar = *iter_;
+    char currentChar = peek();
     if (currentChar == '\"') {
       tok = consumeStrLiteral();
     } else if (currentChar == '\'') {
@@ -69,8 +79,8 @@ private:
   }
 
   void skipSpacesAndComments() {
-    while (iter_ != endIter_) {
-      if (std::isspace(*iter_)) {
+    while (!isEof()) {
+      if (std::isspace(peek())) {
         consumeChar();
       } else if (isComment()) {
         skipComment();
@@ -81,11 +91,11 @@ private:
   }
 
   bool isComment() {
-    std::string maybeComment = {*iter_};
+    std::string maybeComment = {peek()};
     consumeChar();
-    if (iter_ == endIter_)
+    if (isEof())
       return false;
-    maybeComment += *iter_;
+    maybeComment += peek();
     if (maybeComment == "//" || maybeComment == "/*") {
       return true;
     }
@@ -94,23 +104,24 @@ private:
   }
 
   void skipComment() {
-    if (*iter_ == '/') {
-      while (*iter_ != '\n') {
+    if (peek() == '/') {
+      while (peek() != '\n') {
         consumeChar();
       }
-    } else if (*iter_ == '*') {
+    } else if (peek() == '*') {
       char prev = 0;
-      char cur = *iter_;
+      char cur = peek();
       while (prev != '*' && cur != '\\') {
         prev = cur;
-        cur = *consumeChar();
+        cur = consumeChar();
       }
     }
     consumeChar();
   }
 
-  std::string::iterator consumeChar() {
-    switch (*iter_) {
+  char consumeChar() {
+    char c = inputStream_.get();
+    switch (c) {
     case '\n':
       currentLinePos_++;
       currentInLinePos_ = 1;
@@ -122,22 +133,24 @@ private:
       currentInLinePos_++;
       break;
     }
-
-    return ++iter_;
+    return c;
   }
 
-  std::string::iterator putbackChar() {
-    --iter_;
+  char peek() { return inputStream_.peek(); }
+
+  bool isEof() { return inputStream_.eof(); }
+
+  void putbackChar() {
+    inputStream_.unget();
     currentInLinePos_--;
-    return iter_;
   }
 
   Token consumeSymbol() {
     char nextChar = 0;
-    char currentChar = *iter_;
+    char currentChar = peek();
     consumeChar();
-    if (iter_ != endIter_) {
-      nextChar = *iter_;
+    if (!isEof()) {
+      nextChar = peek();
     }
 
     std::string maybeDoubleCharSym = {currentChar, nextChar};
@@ -155,8 +168,8 @@ private:
 
   std::string consumeWord() {
     std::string word;
-    while (iter_ != endIter_ && (std::isalnum(*iter_) || *iter_ == '_')) {
-      word += *iter_;
+    while (!isEof() && (std::isalnum(peek()) || peek() == '_')) {
+      word += peek();
       consumeChar();
     }
     return word;
@@ -167,8 +180,8 @@ private:
     unsigned beginInLinePos = currentInLinePos_;
     consumeChar();
     char charLiteral = 0;
-    if (iter_ != endIter_) {
-      charLiteral = *iter_;
+    if (!isEof()) {
+      charLiteral = peek();
       consumeChar();
     } else {
       std::cerr << "Missing terminating \' character\n"
@@ -177,7 +190,7 @@ private:
       throw std::runtime_error("Lexer error");
     }
 
-    if (iter_ == endIter_ || *iter_ != '\'') {
+    if (isEof() || peek() != '\'') {
       std::cerr << "Missing terminating \' character\n"
                    "Initial \" character on line "
                 << beginLinePos << ":" << beginInLinePos;
@@ -193,28 +206,26 @@ private:
     unsigned beginInLinePos = currentInLinePos_;
     consumeChar();
     std::string strLiteral;
-    while (iter_ != endIter_ && *iter_ != '\"') {
-      strLiteral += *iter_;
+    while (!isEof() && peek() != '\"') {
+      strLiteral += peek();
       consumeChar();
     }
-    if (iter_ == endIter_) {
+    if (isEof()) {
       std::cerr << "Missing terminating \" character\n"
                    "Initial \" character on line "
                 << beginLinePos << ":" << beginInLinePos;
       throw std::runtime_error("Lexer error");
     }
     consumeChar();
-
     return Token(TokenType::STR_LITERAL, TokenKind::NOT_KEYWORD, strLiteral);
   }
 
   Token consumeNumberLiteral() {
     std::string num;
-    while (iter_ != endIter_ && std::isdigit(*iter_)) {
-      num += *iter_;
+    while (!isEof() && std::isdigit(peek())) {
+      num += peek();
       consumeChar();
     }
-
     return Token(TokenType::INT_LITERAL, TokenKind::NOT_KEYWORD, num);
   }
 
@@ -242,7 +253,7 @@ private:
     return false;
   }
 
-  bool isNnumber(const std::string &lexem) {
+  bool isNumber(const std::string &lexem) {
     for (const char &c : lexem) {
       if (std::isdigit(c))
         continue;
@@ -273,9 +284,7 @@ private:
   }
 
 private:
-  std::string sourceText_;
-  std::string::iterator iter_;
-  std::string::iterator endIter_;
+  std::istream& inputStream_;
   Token currentToken_;
   unsigned int currentLinePos_ = 1;
   unsigned int currentInLinePos_ = 1;

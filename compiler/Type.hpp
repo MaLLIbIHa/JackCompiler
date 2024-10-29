@@ -11,7 +11,7 @@ protected:
   Type(TypeId typeId) : typeId_(typeId) {}
 
 public:
-  static bool isAssignable(Type *lhs, Type *rhs) {
+  static bool isAssignable(const Type *lhs, const Type *rhs) {
     if ((lhs->typeId_ == TypeId::NullTy && rhs->typeId_ == TypeId::ArrayTy) ||
         (lhs->typeId_ == TypeId::NullTy && rhs->typeId_ == TypeId::ClassTy) ||
         (lhs->typeId_ == TypeId::ArrayTy && rhs->typeId_ == TypeId::NullTy) ||
@@ -19,7 +19,6 @@ public:
         lhs == rhs) {
       return true;
     }
-
     return false;
   }
 
@@ -49,27 +48,17 @@ public:
   }
 
   TypeId getTypeId() const { return typeId_; }
-
   // if Type is ArrayType
-  Type *getArrayElementType() const;
-
+  const Type *getArrayElementType() const;
   // if Type is ClassType
   std::string getClassName() const;
-
   std::string toString() const;
-
   bool isIntTy() const { return typeId_ == TypeId::IntTy; }
-
   bool isCharTy() const { return typeId_ == TypeId::CharTy; }
-
   bool isBoolTy() const { return typeId_ == TypeId::BoolTy; }
-
   bool isArrayTy() const { return typeId_ == TypeId::ArrayTy; }
-
   bool isClassTy() const { return typeId_ == TypeId::ClassTy; }
-
   bool isNullTy() const { return typeId_ == TypeId::NullTy; }
-
   bool isVoidTy() const { return typeId_ == TypeId::VoidTy; }
 
 private:
@@ -78,8 +67,8 @@ private:
 
 class ArrayType final : public Type {
 public:
-  static ArrayType *getArrayTy(Type *type) {
-    static std::unordered_map<Type *, ArrayType> arrayTypeContainer_;
+  static ArrayType *getArrayTy(const Type *type) {
+    static std::unordered_map<const Type *, ArrayType> arrayTypeContainer_;
     auto type_it = arrayTypeContainer_.find(type);
     if (type_it == arrayTypeContainer_.end()) {
       ArrayType t(TypeId::ArrayTy, type);
@@ -91,17 +80,17 @@ public:
   }
 
 private:
-  ArrayType(TypeId typeId, Type *containedType)
+  ArrayType(TypeId typeId, const Type *containedType)
       : Type(typeId), containedType_(containedType) {}
 
 public:
-  Type *getArrayElementType() const { return containedType_; }
+  const Type *getArrayElementType() const { return containedType_; }
 
 private:
-  Type *containedType_;
+  const Type *containedType_;
 };
 
-inline Type *Type::getArrayElementType() const {
+inline const Type *Type::getArrayElementType() const {
   auto arrType = static_cast<ArrayType const *>(this);
   return arrType->getArrayElementType();
 }
@@ -120,14 +109,12 @@ public:
     }
   }
 
+  std::string getClassName() const { return className_; }
+
 private:
   ClassType(TypeId typeId, std::string className)
       : Type(typeId), className_(std::move(className)) {}
 
-public:
-  std::string getClassName() const { return className_; }
-
-private:
   std::string className_;
 };
 

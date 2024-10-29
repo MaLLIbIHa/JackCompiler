@@ -1,6 +1,7 @@
 #pragma once
 #include "NodeDescriptors.hpp"
 #include "Type.hpp"
+#include "compiler/AST2.hpp"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -18,29 +19,23 @@ enum class SymbolType {
 class SymbolNode {
 public:
   SymbolNode() = default;
-  SymbolNode(std::string name, unsigned linePos, unsigned inLinePos)
-      : name_(std::move(name)), linePos_(linePos), inLinePos_(inLinePos) {}
+  SymbolNode(std::string name, SourceLocation srcLoc)
+      : name_(std::move(name)), srcLoc_(srcLoc) {}
 
   virtual SymbolType getSymbolType() const = 0;
-
   virtual ~SymbolNode() = default;
 
   void setName(std::string name) { name_ = std::move(name); }
-
-  void setLinePos(unsigned int linePos) { linePos_ = linePos; }
-
-  void setInLinePos(unsigned int inLinePos) { inLinePos_ = inLinePos; }
+  void setSourceLoc(SourceLocation srcLoc) { srcLoc_ = srcLoc; }
 
   std::string getName() const { return name_; }
-
-  unsigned int getInLinePos() const { return inLinePos_; }
-
-  unsigned int getLinePos() const { return linePos_; }
+  SourceLocation getSourceLocation() const { return srcLoc_; }
+  unsigned int getInLinePos() const { return srcLoc_.getInLinePos(); }
+  unsigned int getLinePos() const { return srcLoc_.getLinePos(); }
 
 protected:
   std::string name_;
-  unsigned linePos_ = 0;
-  unsigned inLinePos_ = 0;
+  SourceLocation srcLoc_;
 };
 
 class SymbolTable final {
@@ -70,15 +65,13 @@ private:
 class ClassSymbol final : public SymbolNode {
 public:
   ClassSymbol() = default;
-  ClassSymbol(std::string name, Type *classType, unsigned linePos,
-              unsigned inLinePos)
-      : SymbolNode(name, linePos, inLinePos), classType_(classType) {}
+  ClassSymbol(std::string name, ClassType *classType, SourceLocation srcLoc)
+    : SymbolNode(std::move(name), srcLoc), classType_(classType) {}
+
+  void setClassType(ClassType *classType) { classType_ = classType; }
 
   SymbolType getSymbolType() const override { return SymbolType::CLASS_SYM; }
-
-  void setClassType(Type *classType) { classType_ = classType; }
-
-  Type *getClassType() { return classType_; }
+  ClassType *getClassType() { return classType_; }
 
   std::shared_ptr<SymbolNode> findMember(std::string name) const {
     return symTable_.find(name);
@@ -95,103 +88,110 @@ public:
 
 private:
   SymbolTable symTable_;
-  Type *classType_;
+  ClassType *classType_;
 };
 
 class SubroutineSymbol final : public SymbolNode {
 public:
   SubroutineSymbol() = default;
 
-  SubroutineSymbol(std::string name, Type *retT, std::vector<Type *> args,
-                   SubroutineKind sType, unsigned linePos, unsigned inLinePos)
-      : SymbolNode(name, linePos, inLinePos), retType_(retT),
+  SubroutineSymbol(std::string name, const Type *retT, 
+                   std::vector<const Type *> args, SubroutineKind sType,
+                   SourceLocation srcLoc)
+      : SymbolNode(name, srcLoc), retType_(retT),
         argsTypes_(std::move(args)), sType_(sType) {}
+
+  void setKind(SubroutineKind kind) { sType_ = kind; }
+  void setRetType(Type *retType) { retType_ = retType; }
+  void addArgType(Type *type) { argsTypes_.push_back(type); }
+
+  SubroutineKind getKind() const { return sType_; }
+  const Type *getRetType() const { return retType_; }
+  unsigned getArgsCount() const { return argsTypes_.size(); }
+  const Type *getArgType(unsigned i) const { return argsTypes_[i]; }
+
+  std::vector<const Type *>::const_iterator arg_type_begin() const {
+    return argsTypes_.cbegin();
+  }
+  std::vector<const Type *>::const_iterator arg_type_end() const {
+    return argsTypes_.cend();
+  }
 
   SymbolType getSymbolType() const override {
     return SymbolType::SUBROUTINE_SYM;
   }
 
-  void setKind(SubroutineKind kind) { sType_ = kind; }
-
-  SubroutineKind getKind() const { return sType_; }
-
-  void setRetType(Type *retType) { retType_ = retType; }
-
-  Type *getRetType() const { return retType_; }
-
-  void addArgType(Type *type) { argsTypes_.push_back(type); }
-
-  Type *getArgType(unsigned i) const { return argsTypes_[i]; }
-
-  unsigned getArgCount() const { return argsTypes_.size(); }
-
 private:
-  std::vector<Type *> argsTypes_;
-  Type *retType_;
+  std::vector<const Type *> argsTypes_;
+  const Type *retType_;
   SubroutineKind sType_;
 };
 
 class VarSymbol : public SymbolNode {
 public:
-  VarSymbol(std::string name, Type *vType, unsigned linePos, unsigned inLinePos)
-      : SymbolNode(name, linePos, inLinePos), vType_(vType) {}
+  VarSymbol(std::string name, const Type *vType, SourceLocation srcLoc)
+      : SymbolNode(name, srcLoc), vType_(vType) {}
 
   virtual SymbolType getSymbolType() const = 0;
-
+  
+  const Type *getVarType() const { return vType_; }
   void setType(Type *type) { vType_ = type; }
 
-  Type *getVarType() const { return vType_; }
-
 private:
-  Type *vType_;
+  const Type *vType_;
 };
 
-class LocalVariableSymbol final : public VarSymbol {
+class LocalVarSymbol final : public VarSymbol {
 public:
+  using VarSymbol::VarSymbol;
+  
   SymbolType getSymbolType() const override {
     return SymbolType::LOCAL_VARIABLE_SYM;
   }
 };
 
-class ArgumentVariableSymbol final : public VarSymbol {
+class ArgumentVarSymbol final : public VarSymbol {
 public:
+  using VarSymbol::VarSymbol;
+
   SymbolType getSymbolType() const override {
     return SymbolType::ARGUMENT_VARIABLE_SYM;
   }
 };
 
-class FieldVariableSymbol final : public VarSymbol {
+class FieldVarSymbol final : public VarSymbol {
 public:
-  FieldVariableSymbol(std::string name, Type *vType, ClassSymbol *parentClass,
-                      unsigned index, unsigned linePos, unsigned inLinePos)
-      : VarSymbol(name, vType, linePos, inLinePos), parentClass_(parentClass),
+  using VarSymbol::VarSymbol;
+
+  FieldVarSymbol(std::string name, const Type *vType,
+                      ClassSymbol *parentClass, unsigned index,
+                      SourceLocation srcLoc)
+      : VarSymbol(name, vType, srcLoc), parentClass_(parentClass),
         index_(index) {}
+
+  ClassSymbol *getParentClass() const { return parentClass_; }
+  unsigned getIndex() const { return index_; }
 
   SymbolType getSymbolType() const override {
     return SymbolType::FIELD_VARIABLE_SYM;
   }
-
-  ClassSymbol *getParentClass() const { return parentClass_; }
-
-  unsigned getIndex() const { return index_; }
-
 private:
   ClassSymbol *parentClass_;
   unsigned index_;
 };
 
-class StaticVariableSymbol final : public VarSymbol {
+class StaticVarSymbol final : public VarSymbol {
 public:
-  StaticVariableSymbol(std::string name, Type *vType, ClassSymbol *parentClass,
-                       unsigned linePos, unsigned inLinePos)
-      : VarSymbol(name, vType, linePos, inLinePos), parentClass_(parentClass) {}
+  using VarSymbol::VarSymbol;
 
-  SymbolType getSymbolType() const override {
-    return SymbolType::STATIC_VARIABLE_SYM;
-  }
+  StaticVarSymbol(std::string name, const Type *vType, ClassSymbol *parentClass,
+                       SourceLocation srcLoc)
+      : VarSymbol(name, vType, srcLoc), parentClass_(parentClass) {}
 
   ClassSymbol *getParentClass() const { return parentClass_; }
-
+  SymbolType getSymbolType() const override { 
+    return SymbolType::STATIC_VARIABLE_SYM; 
+  }
 private:
   ClassSymbol *parentClass_;
 };

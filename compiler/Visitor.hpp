@@ -82,17 +82,17 @@ struct Visitor {
   virtual void postVisit(const CallExpr*) {}
   virtual void postVisit(const MemberExpr*) {}
 
-  virtual void interVisit(const Program*, unsigned int) {}
-  virtual void interVisit(const ClassDec*, unsigned int) {}
-  virtual void interVisit(const SubroutineDec*, unsigned int) {}
-  virtual void interVisit(const SubroutineList*, unsigned int) {}
-  virtual void interVisit(const SubroutineBody*, unsigned int) {}
-  virtual void interVisit(const StatementList*, unsigned int) {}
-  virtual void interVisit(const LetStatement*, unsigned int) {}
-  virtual void interVisit(const IfStatement*, unsigned int) {}
-  virtual void interVisit(const WhileStatement*, unsigned int) {}
-  virtual void interVisit(const BinopExpr*, unsigned int) {}
-  virtual void interVisit(const ArrayMemberExpr*, unsigned int) {}
+  virtual void interVisit(const Program*, unsigned) {}
+  virtual void interVisit(const ClassDec*, unsigned) {}
+  virtual void interVisit(const SubroutineDec*, unsigned) {}
+  virtual void interVisit(const SubroutineList*, unsigned) {}
+  virtual void interVisit(const SubroutineBody*, unsigned) {}
+  virtual void interVisit(const StatementList*, unsigned) {}
+  virtual void interVisit(const LetStatement*, unsigned) {}
+  virtual void interVisit(const IfStatement*, unsigned) {}
+  virtual void interVisit(const WhileStatement*, unsigned) {}
+  virtual void interVisit(const BinopExpr*, unsigned) {}
+  virtual void interVisit(const ArrayMemberExpr*, unsigned) {}
 
   virtual ~Visitor() = default;
 };

@@ -1,68 +1,77 @@
 #pragma once
-#include "AST.hpp"
 #include "SymbolTable.hpp"
 #include "Visitor.hpp"
+#include "compiler/AST2.hpp"
+#include "compiler/NodeDescriptors.hpp"
+#include "compiler/Type.hpp"
+#include <cassert>
+#include <memory>
 #include <string>
 
-class symbolsVisitor final : public Visitor {
+class SymbolsVisitor final : public Visitor {
 public:
-  symbolsVisitor(SymbolTable *globalTable)
-      : currentClass_(std::make_shared<ClassSymbol>()),
-        globalTable_(globalTable) {}
+  SymbolsVisitor(SymbolTable *globalTable)
+    : globalTable_(globalTable) {}
 
-  void preVisit(ClassDec *cl) override {
-    currentClass_->setName(cl->getName());
-    currentClass_->setLinePos(cl->getSourceLoc().getLinePos());
-    currentClass_->setInLinePos(cl->getSourceLoc().getInLinePos());
+  void preVisit(const ClassDec *cl) override {
+    currentClass_ =
+        std::make_shared<ClassSymbol>(cl->getName(), 
+                                      ClassType::getClassTy(cl->getName()),
+                                      cl->getSourceLoc());
+    unsigned fieldVarIndex = 0;
+    for (auto it = cl->var_begin();
+         it != cl->var_end();
+         ++it, ++fieldVarIndex) {
+      VariableDec* var = *it;
+      FieldVarSymbol varSym(var->getVarName(), var->getVarType(),
+                            currentClass_.get(), fieldVarIndex, 
+                            var->getSourceLoc());
+      currentClass_->addSymbol(var->getVarName(),
+                               std::make_shared<FieldVarSymbol>(varSym));
+    }
   }
 
-  void preVisit(SubroutineDec *subDec) override {
-    auto argsList = subDec->child(0);
-    std::vector<Type *> argTypes;
-    for (unsigned i = 0; i < argsList->children(); i++) {
-      auto arg = static_cast<VariableDec *>(argsList->child(i));
-      Type *type = arg->getVarType();
-      argTypes.push_back(type);
+  void preVisit(const SubroutineDec *subDec) override {
+    std::vector<const Type *> argTypes;
+    for (auto it = subDec->args_begin(); it != subDec->args_end(); ++it) {
+      argTypes.push_back((*it)->getVarType());
     }
-
     std::string subName = subDec->getName();
-    SubroutineSymbol subSym(subName, subDec->getRetType(), argTypes,
-                            subDec->getSubroutineKind(), subDec->getLinePos(),
-                            subDec->getInLinePos());
+    SubroutineSymbol subSym(subName, subDec->getReturnType(), std::move(argTypes),
+                            toSubroutineKind(subDec), subDec->getSourceLoc());
     currentClass_->addSymbol(subName,
                              std::make_shared<SubroutineSymbol>(subSym));
   }
 
-  void preVisit(FieldVariableList *memberList) override {
-    for (unsigned idx = 0; idx < memberList->children(); idx++) {
-      auto var = std::static_pointer_cast<VariableDec>(memberList->child(idx));
-      FieldVariableSymbol varSym(var->getVarName(), var->getVarType(),
-                                 currentClass_.get(), idx, var->getLinePos(),
-                                 var->getInLinePos());
-      currentClass_->addSymbol(var->getVarName(),
-                               std::make_shared<FieldVariableSymbol>(varSym));
-    }
+  void preVisit(const StaticVarDec *var) override {
+    StaticVarSymbol varSym(var->getVarName(), var->getVarType(),
+                                currentClass_.get(), var->getSourceLoc());
+    currentClass_->addSymbol(var->getVarName(),
+                              std::make_shared<StaticVarSymbol>(varSym));
   }
 
-  void preVisit(StaticVariableList *memberList) override {
-    for (unsigned idx = 0; idx < memberList->children(); idx++) {
-      auto var = std::static_pointer_cast<VariableDec>(memberList->child(idx));
-      StaticVariableSymbol varSym(var->getVarName(), var->getVarType(),
-                                  currentClass_.get(), var->getLinePos(),
-                                  var->getInLinePos());
-      currentClass_->addSymbol(var->getVarName(),
-                               std::make_shared<StaticVariableSymbol>(varSym));
-    }
-  }
-
-  void postVisit(ClassDec *cl) override {
+  void postVisit(const ClassDec *cl) override {
     globalTable_->insert(currentClass_->getName(), currentClass_);
-    currentClass_ = std::make_shared<ClassSymbol>();
+    currentClass_ = nullptr;
   }
 
   SymbolTable *getGlobalTable() { return globalTable_; }
 
 private:
-  std::shared_ptr<ClassSymbol> currentClass_;
+  SubroutineKind toSubroutineKind(const SubroutineDec* subrtn) {
+    switch (subrtn->getNodeType()) {
+    case NodeType::METHOD_DEC:
+      return SubroutineKind::METHOD_S;
+    case NodeType::CONSTRUCTOR_DEC:
+      return SubroutineKind::CONSTRUCTOR_S;
+    case NodeType::FUNCTION_DEC:
+      return SubroutineKind::FUNCTION_S;
+    default:
+      assert(false && "unreachable");
+    }
+  }
+
+private:
+  std::shared_ptr<ClassSymbol> currentClass_ = nullptr;
   SymbolTable *globalTable_;
 };

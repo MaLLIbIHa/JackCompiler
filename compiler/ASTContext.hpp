@@ -14,13 +14,14 @@ public:
   createNode(Args &&...constructorArgs) {
     auto node =
         std::make_unique<NodeType>(std::forward<Args>(constructorArgs)...);
+    auto rawNodePtr = node.get();
     ASTNodes_.push_back(std::move(node));
     if constexpr (std::same_as<NodeType, ClassDec>)
-      program_.addClassDec(node);
-    return node.get();
+      program_.addClassDec(rawNodePtr);
+    return rawNodePtr;
   }
 
-  void accept(Visitor &&v) const { program_.accept(v); }
+  void accept(Visitor &v) const { program_.accept(v); }
 
 private:
   Program program_;

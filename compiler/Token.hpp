@@ -64,7 +64,7 @@ enum class TokenKind {
   EQL,     // ==
   binopEnd,
 
-  TILDE, // ~
+  EXCLAMATION, // !
   symbolEnd
 };
 
@@ -91,7 +91,7 @@ public:
       {"var", TokenKind::VAR},
       {"int", TokenKind::INT},
       {"char", TokenKind::CHAR},
-      {"boolean", TokenKind::BOOLEAN},
+      {"bool", TokenKind::BOOLEAN},
       {"void", TokenKind::VOID},
       {"newArray", TokenKind::NEW_ARRAY},
       {"deleteArray", TokenKind::DELETE_ARRAY},
@@ -126,7 +126,7 @@ public:
       {">", TokenKind::GTR},
       {"=", TokenKind::ASSIGN},
       {"==", TokenKind::EQL},
-      {"~", TokenKind::TILDE}};
+      {"!", TokenKind::EXCLAMATION}};
 
 public:
   Token() = default;
@@ -136,7 +136,7 @@ public:
 
   Token(TokenType tokT, TokenKind kind, std::string value, 
         SourceLocation srcLoc)
-      : srcLoc_(srcLoc) {}
+      : type_(tokT), kind_(kind), value_(value), srcLoc_(srcLoc) {}
 
   void setSourceLocation(SourceLocation srcLoc) { srcLoc_ = srcLoc; }
   void setValue(std::string val) { value_ = val; }

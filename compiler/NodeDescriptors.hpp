@@ -27,7 +27,7 @@ enum class NodeType {
   CALL_EXPR,
 };
 
-enum class OpType {
+enum class BinopType {
   ADD_OP,
   SUB_OP,
   MUL_OP,
@@ -39,8 +39,10 @@ enum class OpType {
   LSS_OP,
   GTR_OP,
   EQL_OP,
+};
+enum class UnopType {
   NEG_OP,
-  TILDE_OP,
+  NOT_OP,
 };
 
 enum class SubroutineKind {

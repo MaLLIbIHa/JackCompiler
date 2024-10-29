@@ -1,7 +1,8 @@
 #pragma once
-#include "AST.hpp"
 #include "SymbolTable.hpp"
+#include "compiler/AST2.hpp"
 #include "sstream"
+#include <iostream>
 
 enum class ValueCategory {
   NOT_VALUE,
@@ -14,29 +15,27 @@ public:
   SemanticChecker(const SymbolTable *globalTable, const SymbolTable *localTable)
       : globalTable_(globalTable), localTable_(localTable) {}
 
-  void setCurrentSubroutine(SubroutineSymbol *curSubrtn) {
+  void setCurrentSubroutine(const SubroutineSymbol *curSubrtn) {
     currentSubrtn_ = curSubrtn;
   }
 
-  void checkSubroutine(SubroutineDec *subrtnNode, SubroutineSymbol *subrtnSym) {
-    Type *retType = subrtnSym->getRetType();
+  void checkSubroutine(const SubroutineDec *subrtnNode,
+                       const SubroutineSymbol *subrtnSym) {
+    const Type *retType = subrtnSym->getRetType();
     if (!isTypeExist(retType)) {
-      std::cerr << lineErrMsg(subrtnNode->getLinePos(),
-                              subrtnNode->getInLinePos())
+      std::cerr << lineErrMsg(subrtnNode->getSourceLoc())
                 << "Return type is undefined\n"
                 << "Provided " << retType->toString() << "\n"
                 << "In function " << subrtnSym->getName() << std::endl;
       throw std::runtime_error("Semantic error");
     }
 
-    auto argListNode = subrtnNode->child(0);
-    unsigned argsCount = subrtnSym->getArgCount();
-    for (unsigned i = 0; i < argsCount; i++) {
-      Type *argType = subrtnSym->getArgType(i);
-      if (!isTypeExist(argType)) {
-        unsigned linePos = argListNode->child(i)->getLinePos();
-        unsigned inLinePos = argListNode->child(i)->getInLinePos();
-        std::cerr << lineErrMsg(linePos, inLinePos)
+    for (auto argIt = subrtnNode->args_begin();
+         argIt != subrtnNode->args_end();
+         ++argIt) {
+      VariableDec* arg = *argIt;
+      if (!isTypeExist(arg->getVarType())) {
+        std::cerr << lineErrMsg(arg->getSourceLoc())
                   << "Argument type is undefined\n"
                   << "Provided " << retType->toString() << "\n"
                   << "In function " << subrtnSym->getName() << std::endl;
@@ -46,7 +45,7 @@ public:
   }
 
   std::shared_ptr<SymbolNode> checkName(const ClassSymbol *currentClass,
-                                        NameExpr *nameExpr) {
+                                        const NameExpr *nameExpr) {
     std::string name = nameExpr->getName();
     auto curSymbol = localTable_->find(name);
     if (curSymbol == nullptr) {
@@ -57,7 +56,7 @@ public:
     }
     if (curSymbol == nullptr) {
       std::cerr << currentFuncNameErrMsg()
-                << lineErrMsg(nameExpr->getLinePos(), nameExpr->getInLinePos())
+                << lineErrMsg(nameExpr->getSourceLoc())
                 << "Undeclared name " << name << std::endl;
     }
 
@@ -67,122 +66,128 @@ public:
 
     if (curSymbol->getSymbolType() == SymbolType::FIELD_VARIABLE_SYM) {
       printErrMsg("Cannot use field variables in static function",
-                  nameExpr->getLinePos(), nameExpr->getInLinePos());
+                  nameExpr->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
     if (curSymbol->getName() == "this") {
       printErrMsg("Cannot use \'this\' in static function",
-                  nameExpr->getLinePos(), nameExpr->getInLinePos());
+                  nameExpr->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
 
     return curSymbol;
   }
 
-  SymbolNode *checkMember(SymbolNode *baseSym, MemberExpr *memberExpr) {
-    if (baseSym->getSymbolType() == SymbolType::SUBROUTINE_SYM) {
-      printErrMsg("Request for member in something not a class",
-                  memberExpr->getLinePos(), memberExpr->getInLinePos());
+  SymbolNode *checkMemberOfValue(const Type *baseType,
+                                 const MemberExpr *memberExpr) {
+    if (isPrimitiveType(baseType)) {
+        printErrMsg("Request for member in variable of primitive type",
+                  memberExpr->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
-
-    std::string className;
-    if (baseSym->getSymbolType() == SymbolType::CLASS_SYM) {
-      className = baseSym->getName();
-    } else {
-      Type *nameType = static_cast<VarSymbol *>(baseSym)->getVarType();
-      if (isPrimitiveType(nameType)) {
-        printErrMsg("Request for member in variable of primitive type",
-                    memberExpr->getLinePos(), memberExpr->getInLinePos());
-        throw std::runtime_error("Semantic error");
-      }
-      className = nameType->getClassName();
-    }
-
+    auto className = baseType->getClassName();
     auto classTypeSym =
         std::static_pointer_cast<ClassSymbol>(globalTable_->find(className));
-
     auto memberSym = classTypeSym->findMember(memberExpr->getMember());
     if (memberSym == nullptr) {
       std::cerr << currentFuncNameErrMsg()
-                << lineErrMsg(memberExpr->getLinePos(),
-                              memberExpr->getInLinePos())
+                << lineErrMsg(memberExpr->getSourceLoc())
+                << "Class " << className << " do not have "
+                << memberExpr->getMember() << " member" << std::endl;
+      throw std::runtime_error("Semantic error");
+    }
+    return memberSym.get();
+  }
+
+  SymbolNode *checkMemberOfClass(SymbolNode *baseSym,
+                                 const MemberExpr *memberExpr) {
+    if (baseSym->getSymbolType() != SymbolType::CLASS_SYM) {
+      printErrMsg("Request for member in something not a class",
+                  memberExpr->getSourceLoc());
+      throw std::runtime_error("Semantic error");
+    }
+
+    std::string className = baseSym->getName();
+    auto classTypeSym =
+        std::static_pointer_cast<ClassSymbol>(globalTable_->find(className));
+    auto memberSym = classTypeSym->findMember(memberExpr->getMember());
+    if (memberSym == nullptr) {
+      std::cerr << currentFuncNameErrMsg()
+                << lineErrMsg(memberExpr->getSourceLoc())
                 << "Class " << className << " do not have "
                 << memberExpr->getMember() << " member" << std::endl;
       throw std::runtime_error("Semantic error");
     }
 
-    if (baseSym->getSymbolType() == SymbolType::CLASS_SYM) {
-      bool staticMember = false;
-      if (memberSym->getSymbolType() == SymbolType::STATIC_VARIABLE_SYM) {
-        staticMember = true;
-      }
-      if (memberSym->getSymbolType() == SymbolType::SUBROUTINE_SYM) {
-        auto subrtnSym = std::static_pointer_cast<SubroutineSymbol>(memberSym);
-        staticMember = subrtnSym->getKind() == SubroutineKind::FUNCTION_S ||
-                       subrtnSym->getKind() == SubroutineKind::CONSTRUCTOR_S;
-      }
-      if (!staticMember) {
-        printErrMsg(
-            "Cannot use non-static or non-constructor member with class name",
-            memberExpr->getLinePos(), memberExpr->getInLinePos());
-        throw std::runtime_error("Semantic error");
-      }
+    bool staticMember = false;
+    if (memberSym->getSymbolType() == SymbolType::STATIC_VARIABLE_SYM) {
+      staticMember = true;
+    }
+    if (memberSym->getSymbolType() == SymbolType::SUBROUTINE_SYM) {
+      auto subrtnSym = std::static_pointer_cast<SubroutineSymbol>(memberSym);
+      staticMember = subrtnSym->getKind() == SubroutineKind::FUNCTION_S ||
+                     subrtnSym->getKind() == SubroutineKind::CONSTRUCTOR_S;
+    }
+    if (!staticMember) {
+      printErrMsg(
+          "Cannot use non-static or non-constructor member with class name",
+          memberExpr->getSourceLoc());
+      throw std::runtime_error("Semantic error");
     }
 
     return memberSym.get();
   }
 
-  void checkArrayMember(Type *nameType, Type *indexType,
-                        ArrayMemberExpr *arrayExpr) {
+  void checkArrayMember(const Type *nameType, const Type *indexType,
+                        const ArrayMemberExpr *arrayExpr) {
     if (!nameType->isArrayTy()) {
       printErrMsg("Subscripted object is not \"Array\" type",
-                  arrayExpr->getLinePos(), arrayExpr->getInLinePos());
+                  arrayExpr->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
 
     if (!indexType->isIntTy()) {
       printErrMsg("Array index expression is not an integer",
-                  arrayExpr->getLinePos(), arrayExpr->getInLinePos());
+                  arrayExpr->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
   }
 
   SubroutineSymbol *checkSubroutineCall(SymbolNode *nameSym,
-                                        SubroutineCallExpr *subCall,
-                                        std::vector<Type *>::iterator argBegin,
-                                        std::vector<Type *>::iterator argEnd) {
+        const CallExpr *subCall,
+        std::vector<const Type *>::const_iterator providedArgBegin,
+        std::vector<const Type *>::const_iterator providedArgEnd) {
     if (nameSym->getSymbolType() != SymbolType::SUBROUTINE_SYM) {
-      printErrMsg("Called object is not a subroutine", subCall->getLinePos(),
-                  subCall->getInLinePos());
+      printErrMsg("Called object is not a subroutine", subCall->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
 
     auto subSym = static_cast<SubroutineSymbol *>(nameSym);
-    unsigned subArgsCount = subSym->getArgCount();
-    unsigned callArgsCount = subCall->getArgCount();
+    unsigned subArgsCount = subSym->getArgsCount();
+    unsigned callArgsCount = subCall->getArgsCount();
     if (subArgsCount != callArgsCount) {
       std::cerr << currentFuncNameErrMsg()
-                << lineErrMsg(subCall->getLinePos(), subCall->getInLinePos())
+                << lineErrMsg(subCall->getSourceLoc())
                 << "Argument count mismatch\n"
                 << "Provided " << callArgsCount << "\n"
                 << "In function " << subSym->getName()
-                << " declared arguments count is " << subSym->getArgCount()
+                << " declared arguments count is " << subSym->getArgsCount()
                 << std::endl;
       throw std::runtime_error("Semantic error");
     }
 
-    unsigned i = 0;
-    for (auto &&argIt = argBegin; argBegin != argEnd; ++argIt, ++i) {
-      if (!Type::isAssignable(*argIt, subSym->getArgType(i))) {
-        auto argNode = subCall->child(1)->child(i);
+    for (auto providedIt = providedArgBegin,
+         definedIt = subSym->arg_type_begin();
+         providedIt != providedArgEnd;
+         ++providedIt, ++definedIt) {
+      if (!Type::isAssignable(*providedIt, *definedIt)) {
         std::cerr << currentFuncNameErrMsg()
-                  << lineErrMsg(argNode->getLinePos(), argNode->getInLinePos())
+                  << lineErrMsg(nameSym->getSourceLocation())
                   << "Argument type mismatch\n"
-                  << "Provided argument have type: " << (*argIt)->toString()
+                  << "Provided argument have type: " << (*providedIt)->toString()
                   << "\n"
                   << "In function " << subSym->getName() << " declared type is "
-                  << subSym->getArgType(i)->toString() << std::endl;
+                  << (*definedIt)->toString() << std::endl;
         throw std::runtime_error("Semantic error");
       }
     }
@@ -190,48 +195,49 @@ public:
     return subSym;
   }
 
-  void checkNewArray(Type *arrayElementType, Type *sizeExprType,
-                     NewArrayExpr *newExpr) {
+  void checkNewArray(const Type *arrayElementType,const Type *sizeExprType,
+                     const NewArrayExpr *newExpr) {
     if (!isTypeExist(arrayElementType)) {
-      std::cerr << lineErrMsg(newExpr->getLinePos(), newExpr->getInLinePos())
+      std::cerr << lineErrMsg(newExpr->getSourceLoc())
                 << "First argument of \'newArray\' must be typename\n"
                 << "Provided " << arrayElementType->toString() << std::endl;
       throw std::runtime_error("Semantic error");
     }
 
     if (arrayElementType->isArrayTy()) {
-      std::cerr << lineErrMsg(newExpr->getLinePos(), newExpr->getInLinePos())
+      std::cerr << lineErrMsg(newExpr->getSourceLoc())
                 << "First argument of \'newArray\' must be non-array typename\n"
                 << "Provided " << arrayElementType->toString() << std::endl;
       throw std::runtime_error("Semantic error");
     }
 
     if (!sizeExprType->isIntTy()) {
-      std::cerr << lineErrMsg(newExpr->getLinePos(), newExpr->getInLinePos())
+      std::cerr << lineErrMsg(newExpr->getSourceLoc())
                 << "Second argument of \'newArray\' must be of type int\n"
                 << "Provided " << sizeExprType->toString() << std::endl;
       throw std::runtime_error("Semantic error");
     }
   }
 
-  void checkDeleteArray(Type *deleteExprType, DeleteArrayExpr *delExpr) {
+  void checkDeleteArray(const Type *deleteExprType,
+                        const DeleteArrayExpr *delExpr) {
     if (!deleteExprType->isArrayTy()) {
-      std::cerr << lineErrMsg(delExpr->getLinePos(), delExpr->getInLinePos())
+      std::cerr << lineErrMsg(delExpr->getSourceLoc())
                 << "Argument of \'deleteArray\' must be \"Array\" type\n"
                 << "Provided " << deleteExprType->toString() << std::endl;
       throw std::runtime_error("Semantic error");
     }
   }
 
-  void checkUnop(Type *operandType, UnopExpr *unop) {
+  void checkUnop(const Type *operandType, const UnopExpr *unop) {
     if (operandType == nullptr) {
       printErrMsg("Operand of unary operation must be value",
-                  unop->getLinePos(), unop->getInLinePos());
+                  unop->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
     if (!operandType->isBoolTy() && !operandType->isIntTy()) {
       std::cerr << currentFuncNameErrMsg()
-                << lineErrMsg(unop->getLinePos(), unop->getInLinePos())
+                << lineErrMsg(unop->getSourceLoc())
                 << "Invalid operand to unary operation\n"
                 << "Operand have type: " << operandType->toString()
                 << std::endl;
@@ -239,39 +245,40 @@ public:
     }
   }
 
-  void checkBinop(Type *firstOpType, Type *secondOpType, BinopExpr *binop) {
-    Type *operandsType = nullptr;
-    OpType binopType = binop->getOpType();
+  void checkBinop(const Type *firstOpType, const Type *secondOpType,
+                  const BinopExpr *binop) {
+    const Type *operandsType = nullptr;
+    BinopType binopType = binop->getOpType();
     switch (binopType) {
-    case OpType::ADD_OP:
-    case OpType::SUB_OP:
-    case OpType::DIV_OP:
-    case OpType::MUL_OP:
-    case OpType::BIT_AND_OP:
-    case OpType::BIT_OR_OP:
-    case OpType::LSS_OP:
-    case OpType::GTR_OP:
+    case BinopType::ADD_OP:
+    case BinopType::SUB_OP:
+    case BinopType::DIV_OP:
+    case BinopType::MUL_OP:
+    case BinopType::BIT_AND_OP:
+    case BinopType::BIT_OR_OP:
+    case BinopType::LSS_OP:
+    case BinopType::GTR_OP:
       operandsType = Type::getIntTy();
       break;
-    case OpType::LOG_AND_OP:
-    case OpType::LOG_OR_OP:
+    case BinopType::LOG_AND_OP:
+    case BinopType::LOG_OR_OP:
       operandsType = Type::getBoolTy();
       break;
-    case OpType::EQL_OP:
+    case BinopType::EQL_OP:
       operandsType = firstOpType;
       break;
     }
 
     if (!firstOpType || !secondOpType) {
       printErrMsg("Operands of a binary operation are not a value",
-                  binop->getLinePos(), binop->getInLinePos());
+                  binop->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
 
     if (!Type::isAssignable(firstOpType, operandsType) ||
         !Type::isAssignable(secondOpType, operandsType)) {
       std::cerr << currentFuncNameErrMsg()
-                << lineErrMsg(binop->getLinePos(), binop->getInLinePos())
+                << lineErrMsg(binop->getSourceLoc())
                 << "Invalid types of operands in binary operation\n"
                 << "Left operand have type: " << firstOpType->toString() << "\n"
                 << "Right operand have type: " << secondOpType->toString()
@@ -280,31 +287,32 @@ public:
     }
   }
 
-  void checkVariableDec(Type *varType, VariableDec *var) {
+  void checkVariableDec(const VariableDec *var) {
+    auto varType = var->getVarType();
     if (!isTypeExist(varType)) {
-      std::cerr << lineErrMsg(var->getLinePos(), var->getInLinePos())
+      std::cerr << lineErrMsg(var->getSourceLoc())
                 << "Undefined type: " << varType->toString() << std::endl;
       throw std::runtime_error("Semantic error");
     }
   }
 
-  void checkLetStatement(ValueCategory lhsCategory, Type *lhsType,
-                         Type *rhsType, LetStatement *letStmt) {
+  void checkLetStatement(ValueCategory lhsCategory, const Type *lhsType,
+                         const Type *rhsType, const LetStatement *letStmt) {
     if (lhsCategory != ValueCategory::LVALUE) {
-      auto lhsNode = letStmt->child(0);
+      auto lhsNode = letStmt->getLhs();
       printErrMsg("Lvalue required as left operand of let-statement",
-                  lhsNode->getLinePos(), lhsNode->getInLinePos());
+                  lhsNode->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
     if (!rhsType) {
-      auto rhsNode = letStmt->child(1);
+      auto rhsNode = letStmt->getRhs();
       printErrMsg("Right operand of let-statement must be value",
-                  rhsNode->getLinePos(), rhsNode->getInLinePos());
+                  rhsNode->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
     if (!Type::isAssignable(lhsType, rhsType)) {
       std::cerr << currentFuncNameErrMsg()
-                << lineErrMsg(letStmt->getLinePos(), letStmt->getInLinePos())
+                << lineErrMsg(letStmt->getSourceLoc())
                 << "Operands type mismatch in let-statement\n"
                 << "Left operand have type: " << lhsType->toString() << '\n'
                 << "Right operand have type: " << rhsType->toString()
@@ -313,53 +321,54 @@ public:
     }
   }
 
-  void checkIfStatement(Type *conditionType, IfStatement *ifStmt) {
+  void checkIfStatement(const Type *conditionType, const IfStatement *ifStmt) {
     if (!conditionType->isBoolTy()) {
-      auto conditionNode = ifStmt->child(0);
+      auto conditionNode = ifStmt->getCondition();
       printErrMsg("Condition expression in if-statement must be bool type",
-                  conditionNode->getLinePos(), conditionNode->getInLinePos());
+                  conditionNode->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
   }
 
-  void checkWhileStatement(Type *conditionType, WhileStatement *whileStmt) {
+  void checkWhileStatement(const Type *conditionType,
+                           const WhileStatement *whileStmt) {
     if (!conditionType->isBoolTy()) {
-      auto conditionNode = whileStmt->child(0);
+      auto conditionNode = whileStmt->getCondition();
       printErrMsg("Condition expression in while-statement must be bool type",
-                  conditionNode->getLinePos(), conditionNode->getInLinePos());
+                  conditionNode->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
   }
 
-  void checkDoStatement(DoStatement *doStmt) {
-    auto subCallNode = doStmt->child(0);
+  void checkDoStatement(const DoStatement *doStmt) {
+    auto subCallNode = doStmt->getCallExpr();
     if (subCallNode->getNodeType() != NodeType::CALL_EXPR) {
       printErrMsg("Do statement must contain call expression",
-                  doStmt->getLinePos(), doStmt->getInLinePos());
+                  doStmt->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
   }
 
-  void checkReturnStatement(Type *retExprType, ReturnStatement *retStmt) {
-    Type *subrtnRetType = currentSubrtn_->getRetType();
+  void checkReturnStatement(const Type *retExprType,
+                            const ReturnStatement *retStmt) {
+    const Type* subrtnRetType = currentSubrtn_->getRetType();
 
     if (subrtnRetType->isVoidTy() && !retExprType)
       return;
 
     if (subrtnRetType->isVoidTy() && !retExprType) {
-      printErrMsg("Returning value in void function", retStmt->getLinePos(),
-                  retStmt->getInLinePos());
+      printErrMsg("Returning value in void function", retStmt->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
     if (subrtnRetType->isVoidTy() && !retExprType) {
-      printErrMsg("No return value in non-void function", retStmt->getLinePos(),
-                  retStmt->getInLinePos());
+      printErrMsg("No return value in non-void function",
+                  retStmt->getSourceLoc());
       throw std::runtime_error("Semantic error");
     }
 
     if (!Type::isAssignable(retExprType, subrtnRetType)) {
       std::cerr << currentFuncNameErrMsg()
-                << lineErrMsg(retStmt->getLinePos(), retStmt->getInLinePos())
+                << lineErrMsg(retStmt->getSourceLoc())
                 << "Return statement with " << retExprType->toString()
                 << " expression, "
                 << "in function returning " << subrtnRetType->toString()
@@ -368,7 +377,7 @@ public:
     }
   }
 
-  bool isTypeExist(Type *type) {
+  bool isTypeExist(const Type *type) {
     if (type->isArrayTy()) {
       type = type->getArrayElementType();
     }
@@ -380,7 +389,7 @@ public:
     return true;
   }
 
-  bool isPrimitiveType(Type *type) {
+  bool isPrimitiveType(const Type *type) {
     switch (type->getTypeId()) {
     case Type::TypeId::BoolTy:
     case Type::TypeId::CharTy:
@@ -389,12 +398,13 @@ public:
     case Type::TypeId::NullTy:
     case Type::TypeId::ArrayTy:
       return true;
+    default:
+      return false;
     }
-    return false;
   }
 
-  void printErrMsg(const char *msg, unsigned linePos, unsigned inLinePos) {
-    std::cerr << currentFuncNameErrMsg() << lineErrMsg(linePos, inLinePos)
+  void printErrMsg(const char *msg, SourceLocation srcLoc) {
+    std::cerr << currentFuncNameErrMsg() << lineErrMsg(srcLoc)
               << msg << std::endl;
   }
 
@@ -402,9 +412,10 @@ public:
     return "In function " + currentSubrtn_->getName() + "\n";
   }
 
-  std::string lineErrMsg(unsigned linePos, unsigned inLinePos) {
+  std::string lineErrMsg(SourceLocation srcLoc) {
     std::stringstream msg;
-    msg << "On line " << linePos << ":" << inLinePos << '\n';
+    msg << "On line " << srcLoc.getLinePos() << ":" 
+        << srcLoc.getInLinePos() << '\n';
     return msg.str();
   }
 
