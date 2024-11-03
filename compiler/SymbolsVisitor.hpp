@@ -36,16 +36,23 @@ public:
     for (auto it = subDec->args_begin(); it != subDec->args_end(); ++it) {
       argTypes.push_back((*it)->getVarType());
     }
-    std::string subName = subDec->getName();
-    SubroutineSymbol subSym(subName, subDec->getReturnType(), std::move(argTypes),
-                            toSubroutineKind(subDec), subDec->getSourceLoc());
-    currentClass_->addSymbol(subName,
+    bool haveBody = subDec->getSubroutineBody() != nullptr;
+    std::string mangledName =
+        currentClass_->getName() == "Main" && subDec->getName() == "main" ?
+        subDec->getName() :
+        currentClass_->getName() + '_' + subDec->getName();
+    SubroutineSymbol subSym(mangledName, subDec->getReturnType(),
+                            std::move(argTypes), toSubroutineKind(subDec),
+                            subDec->getSourceLoc(), haveBody);
+    currentClass_->addSymbol(subDec->getName(),
                              std::make_shared<SubroutineSymbol>(subSym));
   }
 
   void preVisit(const StaticVarDec *var) override {
-    StaticVarSymbol varSym(var->getVarName(), var->getVarType(),
-                                currentClass_.get(), var->getSourceLoc());
+    std::string mangledName =
+        currentClass_->getName() + '_' + var->getVarName();
+    StaticVarSymbol varSym(mangledName, var->getVarType(),
+                           currentClass_.get(), var->getSourceLoc());
     currentClass_->addSymbol(var->getVarName(),
                               std::make_shared<StaticVarSymbol>(varSym));
   }

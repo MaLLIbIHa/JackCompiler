@@ -3,6 +3,7 @@
 #include "Visitor.hpp"
 #include "compiler/NodeDescriptors.hpp"
 #include <cassert>
+#include <string>
 
 class PrintVisitor final : public Visitor {
 public:
@@ -229,7 +230,18 @@ private:
   void preVisit(const CallExpr *expr) override {
     output_ << opentagWithIncIndent("callExpression");
   }
+  void interVisit(const CallExpr *expr, unsigned visitCnt) override {
+    if (visitCnt != 1) {
+      output_ << closetagWithDecIndent(
+          "argument " + std::to_string(visitCnt - 1));
+    }
+    output_ << opentagWithIncIndent("argument " + std::to_string(visitCnt));
+  }
   void postVisit(const CallExpr *expr) override {
+    if (expr->getArgsCount() != 0) {
+      output_ << closetagWithDecIndent(
+          "argument" + std::to_string(expr->getArgsCount()));
+    }
     output_ << closetagWithDecIndent("callExpression");
   }
 

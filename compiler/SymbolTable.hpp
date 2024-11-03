@@ -97,9 +97,9 @@ public:
 
   SubroutineSymbol(std::string name, const Type *retT, 
                    std::vector<const Type *> args, SubroutineKind sType,
-                   SourceLocation srcLoc)
+                   SourceLocation srcLoc, bool haveBody)
       : SymbolNode(name, srcLoc), retType_(retT),
-        argsTypes_(std::move(args)), sType_(sType) {}
+        argsTypes_(std::move(args)), sType_(sType), haveBody_(haveBody) {}
 
   void setKind(SubroutineKind kind) { sType_ = kind; }
   void setRetType(Type *retType) { retType_ = retType; }
@@ -109,6 +109,7 @@ public:
   const Type *getRetType() const { return retType_; }
   unsigned getArgsCount() const { return argsTypes_.size(); }
   const Type *getArgType(unsigned i) const { return argsTypes_[i]; }
+  bool haveBody() const { return haveBody_; }
 
   std::vector<const Type *>::const_iterator arg_type_begin() const {
     return argsTypes_.cbegin();
@@ -125,6 +126,7 @@ private:
   std::vector<const Type *> argsTypes_;
   const Type *retType_;
   SubroutineKind sType_;
+  bool haveBody_;
 };
 
 class VarSymbol : public SymbolNode {

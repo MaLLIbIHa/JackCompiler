@@ -91,6 +91,7 @@ struct Visitor {
   virtual void interVisit(const LetStatement*, unsigned) {}
   virtual void interVisit(const IfStatement*, unsigned) {}
   virtual void interVisit(const WhileStatement*, unsigned) {}
+  virtual void interVisit(const CallExpr*, unsigned) {}
   virtual void interVisit(const BinopExpr*, unsigned) {}
   virtual void interVisit(const ArrayMemberExpr*, unsigned) {}
 

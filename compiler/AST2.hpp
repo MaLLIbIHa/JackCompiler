@@ -224,6 +224,12 @@ public:
   void accept(Visitor &v) const override {
     v.preVisit(this);
     subroutineExpr_->accept(v);
+    unsigned visitCnt = 1;
+    for (auto &&arg : args_) {
+      v.interVisit(this, visitCnt);
+      arg->accept(v);
+      visitCnt++;
+    }
     v.postVisit(this);
   }
 
@@ -305,7 +311,7 @@ public:
 private:
   Expression *condition_;
   StatementList *ifBody_;
-  StatementList *elseBody_;
+  StatementList *elseBody_ = nullptr;
 };
 
 class WhileStatement final : public Statement {
@@ -496,7 +502,8 @@ public:
       v.interVisit(this, visitCount);
       visitCount++;
     }
-    body_->accept(v);
+    if (body_ != nullptr)
+      body_->accept(v);
   }
 
 private:

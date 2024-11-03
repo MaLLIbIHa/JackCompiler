@@ -2,6 +2,7 @@
 #include "compiler/ASTContext.hpp"
 #include "compiler/Lexer.hpp"
 #include "compiler/NodeDescriptors.hpp"
+#include "compiler/Token.hpp"
 #include <cassert>
 #include <istream>
 
@@ -16,7 +17,7 @@ public:
     : Ctx_(Ctx),
       lexer_(std::make_unique<Lexer>(inputStream)) {}
 
-  void parseProgram() {
+  void parseFile() {
     while (hasTokens()) {
       parseClass();
     }
@@ -111,10 +112,14 @@ private:
         throw std::runtime_error("Parser error");
       }
     }
-
     consume(TokenKind::RPAREN);
+    SubroutineBody *body = nullptr;
+    if (currentToken().getKind() == TokenKind::SEMICOLON) {
+      consume(TokenKind::SEMICOLON);
+    } else {
+      body = parseSubroutineBody();
+    }
 
-    auto body = parseSubroutineBody();
     return createSubroutineDec(subrtnKindTok.getSourceLocation(), 
                               std::move(subrtnKindTok), name,
                               std::move(args), retType, body);
@@ -184,7 +189,7 @@ private:
     consume(TokenKind::LBRACE);
     auto ifBody = parseStatements();
     consume(TokenKind::RBRACE);
-    StatementList* elseBody;
+    StatementList* elseBody = nullptr;
     if (currentToken().getKind() == TokenKind::ELSE) {
       consume(TokenKind::ELSE);
       consume(TokenKind::LBRACE);

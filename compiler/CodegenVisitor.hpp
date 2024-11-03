@@ -2,6 +2,7 @@
 #include "SemanticChecker.hpp"
 #include "SymbolsVisitor.hpp"
 #include "Visitor.hpp"
+#include "compiler/AST2.hpp"
 #include "compiler/NodeDescriptors.hpp"
 #include "compiler/SymbolTable.hpp"
 #include "compiler/Type.hpp"
@@ -20,10 +21,15 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/ValueSymbolTable.h"
+#include "llvm/IR/Mangler.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/Support/raw_ostream.h"
+#include <algorithm>
 #include <memory>
-#include <ranges>
 #include <stack>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -38,37 +44,43 @@ class CodegenVisitor final : public Visitor {
 public:
   CodegenVisitor()
       : LLVMCtx_(std::make_unique<llvm::LLVMContext>()),
-        IRBuilder_(std::make_unique<llvm::IRBuilder<>>(*LLVMCtx_)),
         LLVMModule_(std::make_unique<llvm::Module>("JackProgram", *LLVMCtx_)),
+        IRBuilder_(std::make_unique<llvm::IRBuilder<>>(*LLVMCtx_)),
         globalTable_(std::make_unique<SymbolTable>()),
         localTable_(std::make_unique<SymbolTable>()),
         semantic_(std::make_unique<SemanticChecker>(globalTable_.get(),
-                                                    localTable_.get())) {}
+                                                    localTable_.get())) {
+    llvm::DataLayout DL(LLVMModule_.get());
+    LLVMModule_->setDataLayout(DL);
+  }
 
   void preVisit(const Program *prog) override {
     SymbolsVisitor symVisitor(globalTable_.get());
     prog->accept(symVisitor);
-    
+    semantic_->checkMainFunc();
+    declareNewArrayFunc();
+    declareDeleteArrayFunc();
+
     auto processFieldAndStaticVars = [this](auto varItBegin, auto varItEnd, 
                                             const std::string& className) {
       std::vector<llvm::Type *> fieldTypes;
-      std::vector<const FieldVarDec *> staticVars;
+      std::vector<const StaticVarDec *> staticVars;
       for (auto varIt = varItBegin; varIt != varItEnd; ++varIt) {
         if ((*varIt)->getNodeType() == NodeType::FIELD_VAR_DEC)
-          fieldTypes.push_back(convertTypeToLLVMType((*varIt)->getVarType()));
+          fieldTypes.push_back(TypeToLLVMType((*varIt)->getVarType()));
         else
-          staticVars.push_back(static_cast<const FieldVarDec*>(*varIt));
+          staticVars.push_back(static_cast<const StaticVarDec*>(*varIt));
       }
 
-      for (const FieldVarDec* var : staticVars) {
+      for (const StaticVarDec* var : staticVars) {
         new llvm::GlobalVariable(*LLVMModule_,
-            convertTypeToLLVMType(var->getVarType()), false,
+            TypeToLLVMType(var->getVarType()), false,
             llvm::GlobalVariable::LinkageTypes::InternalLinkage, nullptr,
-            className + '_' + var->getVarName());
+            var->getVarName());
       }
 
       ClassToLLVMType_[ClassType::getClassTy(className)] =
-          llvm::StructType::create(fieldTypes);
+          llvm::StructType::create(*LLVMCtx_, fieldTypes, className);
     };
 
     auto processSubroutines = [this](auto subrtnBegin, auto subrtnEnd,
@@ -87,8 +99,11 @@ public:
           argNames.push_back(arg->getVarName());
           argTypes.push_back(arg->getVarType());
         }
-        createFunction(className + '_' + S->getName(),
-                       S->getReturnType(), argNames, argTypes);
+        std::string funcName = className + '_' + S->getName();
+        if (className == "Main" && S->getName() == "main") {
+          funcName = S->getName();
+        }
+        createFunction(funcName, S->getReturnType(), argNames, argTypes);
       }
     };
 
@@ -104,6 +119,16 @@ public:
     }
   }
 
+  void postVisit(const Program *prog) override {
+    std::string output;
+    llvm::raw_string_ostream sstream(output);
+    bool res = llvm::verifyModule(*LLVMModule_, &sstream);
+    LLVMModule_->dump();
+    if (res) {
+      throw std::runtime_error("CodegenVisitor error:\n" + output);
+    }
+  }
+
   void preVisit(const ClassDec *cl) override {
     std::string className = cl->getName();
     currentClass_ =
@@ -114,22 +139,58 @@ public:
     std::string subName = subDec->getName();
     currentSubrtn_ = std::static_pointer_cast<SubroutineSymbol>(
         currentClass_->findMember(subName));
+    if (!currentSubrtn_->haveBody())
+      return;
     semantic_->setCurrentSubroutine(currentSubrtn_.get());
     semantic_->checkSubroutine(subDec, currentSubrtn_.get());
 
     SubroutineKind subKind = currentSubrtn_->getKind();
-    if (subKind == SubroutineKind::CONSTRUCTOR_S) {
+    auto func = LLVMModule_->getFunction(currentSubrtn_->getName());
+    auto &&EntryBB = llvm::BasicBlock::Create(*LLVMCtx_, "", func);
+    IRBuilder_->SetInsertPoint(EntryBB);
+    BBReturn_ = llvm::BasicBlock::Create(*LLVMCtx_, "", func);
+    if (!subDec->getReturnType()->isVoidTy()) {
+      auto &&LLVMRetType = TypeToLLVMType(subDec->getReturnType());
+      returnVal_ = IRBuilder_->CreateAlloca(LLVMRetType);
+      IRBuilder_->SetInsertPoint(BBReturn_);
+      auto &&RetVal = IRBuilder_->CreateLoad(LLVMRetType, returnVal_);
+      IRBuilder_->CreateRet(RetVal);
+    } else {
+      IRBuilder_->SetInsertPoint(BBReturn_);
+      IRBuilder_->CreateRet(nullptr);
+    }
+    IRBuilder_->SetInsertPoint(EntryBB);
+    if (subKind == SubroutineKind::CONSTRUCTOR_S ||
+        subKind == SubroutineKind::METHOD_S) {
       auto thisSym = std::make_shared<LocalVarSymbol>(
           "this", currentClass_->getClassType(), subDec->getSourceLoc());
       localTable_->insert("this", thisSym);
+
+      if (subKind == SubroutineKind::CONSTRUCTOR_S) {
+        auto &&classType = currentClass_->getClassType();
+        auto &&alloca = IRBuilder_->CreateAlloca(
+            TypeToLLVMType(classType), nullptr, "this");
+        symbolToAlloca_[thisSym.get()] = alloca;
+        auto &&newFunc = LLVMModule_->getFunction("newArray");
+        auto &&LLVMIntTy = llvm::Type::getInt32Ty(*LLVMCtx_);
+        auto &&callRes = IRBuilder_->CreateCall(newFunc,
+            { getSizeOf(classType), llvm::ConstantInt::get(LLVMIntTy, 1) });
+        IRBuilder_->CreateStore(callRes, alloca);
+      }
     }
-    auto func = LLVMModule_->getFunction(currentClass_->getName() + '_' +
-                                         subDec->getName());
-    auto&& EntryBB = func->getEntryBlock();
-    IRBuilder_->SetInsertPoint(&EntryBB);
   }
 
   void postVisit(const SubroutineDec *subDec) override {
+    if (!currentSubrtn_->haveBody())
+      return;
+    auto &&func = IRBuilder_->GetInsertBlock()->getParent();
+    for (auto &&BBIt = func->begin(); BBIt != func->end(); ) {
+      if (BBIt->empty()) {
+        BBIt = BBIt->eraseFromParent();
+      } else {
+        ++BBIt;
+      }
+    }
     localTable_->clear();
     currentSubrtn_ = nullptr;
   }
@@ -141,17 +202,26 @@ public:
                                                    var->getSourceLoc());
     localTable_->insert(var->getVarName(), varSym);
     auto alloca = IRBuilder_->CreateAlloca(
-        convertTypeToLLVMType(var->getVarType()), nullptr, var->getVarName());
+        TypeToLLVMType(var->getVarType()), nullptr, var->getVarName());
     symbolToAlloca_[varSym.get()] = alloca;
   }
 
   void preVisit(const ArgumentVarDec *var) override {
     semantic_->checkVariableDec(var);
+    if (!currentSubrtn_->haveBody())
+      return;
     auto varSym =
         std::make_shared<ArgumentVarSymbol>(var->getVarName(),
                                             var->getVarType(),
                                             var->getSourceLoc());
     localTable_->insert(var->getVarName(), varSym);
+    auto alloca = IRBuilder_->CreateAlloca(
+        TypeToLLVMType(var->getVarType()), nullptr, var->getVarName());
+    auto LLVMFunc = LLVMModule_->getFunction(currentSubrtn_->getName());
+    auto argVal =
+            LLVMFunc->getValueSymbolTable()->lookup(var->getVarName());
+    IRBuilder_->CreateStore(argVal, alloca);
+    symbolToAlloca_[varSym.get()] = alloca;
   }
 
   void postVisit(const NameExpr *nameExpr) override {
@@ -161,31 +231,24 @@ public:
     ValueCategory valueCat = evalType ? ValueCategory::LVALUE :
                                         ValueCategory::NOT_VALUE;
     llvm::Value* LLVMVal = nullptr;
-    if (evalType) {
-      switch(curSymbol->getSymbolType()) {
-      case SymbolType::LOCAL_VARIABLE_SYM:
-        LLVMVal = symbolToAlloca_[curSymbol.get()];
-        break;
-      case SymbolType::ARGUMENT_VARIABLE_SYM: {
-        auto LLVMFunc = LLVMModule_->getFunction(currentSubrtn_->getName());
-        LLVMVal =
-            LLVMFunc->getValueSymbolTable()->lookup(curSymbol->getName());
-        break;
-      }
-      case SymbolType::FIELD_VARIABLE_SYM: {
-        auto LLVMFunc = LLVMModule_->getFunction(currentSubrtn_->getName());
-        auto thisArg =
-            LLVMFunc->getValueSymbolTable()->lookup("this");
-        auto fieldVar = static_cast<FieldVarSymbol*>(curSymbol.get());
-        LLVMVal = createMemberAccess(thisArg, currentClass_.get(), fieldVar);
-        break;
-      }
-      case SymbolType::SUBROUTINE_SYM:
-        LLVMVal = LLVMModule_->getFunction(currentSubrtn_->getName());
-        break;
-      default:
-        assert(false && "unreachable");
-      }
+    switch(curSymbol->getSymbolType()) {
+    case SymbolType::ARGUMENT_VARIABLE_SYM:
+    case SymbolType::LOCAL_VARIABLE_SYM:
+      LLVMVal = symbolToAlloca_[curSymbol.get()];
+      break;
+    case SymbolType::FIELD_VARIABLE_SYM: {
+      auto LLVMFunc = LLVMModule_->getFunction(currentSubrtn_->getName());
+      auto thisArg =
+          LLVMFunc->getValueSymbolTable()->lookup("this");
+      auto fieldVar = static_cast<FieldVarSymbol*>(curSymbol.get());
+      LLVMVal = createMemberAccess(thisArg, currentClass_.get(), fieldVar);
+      break;
+    }
+    case SymbolType::SUBROUTINE_SYM:
+      LLVMVal = LLVMModule_->getFunction(curSymbol->getName());
+      break;
+    default:
+      LLVMVal = nullptr;
     }
     
     exprStack_.push({ evalType, curSymbol.get(), LLVMVal, valueCat });
@@ -198,10 +261,11 @@ public:
     semantic_->checkNewArray(elementType, newArraySizeExpr.evalType,
                              newArrExpr);
 
-    static auto newArrayFunc = declareNewArrayFunc();
+    auto &&newArrayFunc = declareNewArrayFunc();
+    llvm::Value* sizeVal = LValueToRValue(newArraySizeExpr);
     auto newArrayVal = IRBuilder_->CreateCall(newArrayFunc->getFunctionType(),
-        newArrayFunc, { getSizeOf(elementType), newArraySizeExpr.LLVMVal } );
-    exprStack_.push({ ArrayType::getArrayTy(elementType), 
+        newArrayFunc, { getSizeOf(elementType), sizeVal } );
+    exprStack_.push({ ArrayType::getArrayTy(elementType),
                       nullptr, newArrayVal, ValueCategory::RVALUE });
   }
 
@@ -209,14 +273,14 @@ public:
     ExprInfo deleteArrayExpr = exprStack_.top();
     exprStack_.pop();
     semantic_->checkDeleteArray(deleteArrayExpr.evalType, delArrExpr);
-    static auto deleteArrayFunc = declareDeleteArrayFunc();
+    auto &&deleteArrayFunc = declareDeleteArrayFunc();
     IRBuilder_->CreateCall(deleteArrayFunc->getFunctionType(),
                            deleteArrayFunc, { deleteArrayExpr.LLVMVal });
   }
 
   void postVisit(const LiteralExpr *litExpr) override {
     llvm::Value* LLVMLiteral = nullptr;
-    llvm::Type* LLVMTy = convertTypeToLLVMType(litExpr->getType());
+    llvm::Type* LLVMTy = TypeToLLVMType(litExpr->getType());
     if (litExpr->getType()->isIntTy()) {
       LLVMLiteral = llvm::ConstantInt::get(LLVMTy,
           std::stoi(litExpr->getValue()));
@@ -246,7 +310,6 @@ public:
           semantic_->checkMemberOfValue(memberBase.evalType, memberExpr);
     }
 
-    std::string classPrefix = memberBase.sym->getName() + '_';
     const Type *evalType = symbolToEvalType(memberSym);
     llvm::Value* LLVMVal = nullptr;
     switch(memberSym->getSymbolType()) {
@@ -257,11 +320,15 @@ public:
       break;
     case SymbolType::STATIC_VARIABLE_SYM:
       LLVMVal = 
-          LLVMModule_->getGlobalVariable(classPrefix + memberSym->getName());
+          LLVMModule_->getGlobalVariable(memberSym->getName());
       break;
-    case SymbolType::SUBROUTINE_SYM:
-      LLVMVal = LLVMModule_->getFunction(classPrefix + memberSym->getName());
+    case SymbolType::SUBROUTINE_SYM: {
+      auto subrtnKind = static_cast<SubroutineSymbol*>(memberSym)->getKind();
+      if (subrtnKind == SubroutineKind::METHOD_S)
+        exprStack_.push(memberBase);
+      LLVMVal = LLVMModule_->getFunction(memberSym->getName());
       break;
+    }
     default:
       LLVMVal = nullptr;
     }
@@ -287,40 +354,51 @@ public:
   void postVisit(const CallExpr *subCall) override {
     std::vector<const Type *> argTypes;
     std::vector<llvm::Value *> LLVMArgs;
-    for (unsigned i : std::ranges::iota_view(subCall->getArgsCount())) {
+    for (unsigned i = 0; i < subCall->getArgsCount(); ++i) {
       if (exprStack_.empty()) break;
-      argTypes.push_back(exprStack_.top().evalType);
-      LLVMArgs.push_back(exprStack_.top().LLVMVal);
+      ExprInfo exprInfo = exprStack_.top();
+      llvm::Value* LLVMVal = LValueToRValue(exprInfo);
+      LLVMArgs.push_back(LLVMVal);
+      argTypes.push_back(exprInfo.evalType);
       exprStack_.pop();
     }
+    std::reverse(argTypes.begin(), argTypes.end());
 
     ExprInfo nameInfo = exprStack_.top();
     exprStack_.pop();
     SubroutineSymbol *subSym = semantic_->checkSubroutineCall(
         nameInfo.sym, subCall, argTypes.begin(), argTypes.end());
+    if (subSym->getKind() == SubroutineKind::METHOD_S) {
+      ExprInfo memberBase = exprStack_.top();
+      exprStack_.pop();
+      llvm::Value* LLVMThisArg = LValueToRValue(memberBase);
+      LLVMArgs.push_back(LLVMThisArg);
+    }
+    std::reverse(LLVMArgs.begin(), LLVMArgs.end());
     llvm::Function *func = llvm::cast<llvm::Function>(nameInfo.LLVMVal);
     auto LLVMVal =
         IRBuilder_->CreateCall(func->getFunctionType(), func, LLVMArgs);
     auto valCateg =
-        subSym->getRetType()->isNullTy() ? ValueCategory::NOT_VALUE :
+        subSym->getRetType()->isVoidTy() ? ValueCategory::NOT_VALUE :
                                            ValueCategory::RVALUE;
     exprStack_.push({ subSym->getRetType(), nullptr, LLVMVal, valCateg });
   }
 
   void postVisit(const UnopExpr *unop) override {
-    ExprInfo expr = exprStack_.top();
+    ExprInfo exprInfo = exprStack_.top();
     exprStack_.pop();
-    semantic_->checkUnop(expr.evalType, unop);
+    llvm::Value* operand = LValueToRValue(exprInfo);
+    semantic_->checkUnop(exprInfo.evalType, unop);
     auto LLVMVal = [&](UnopType opType) {
       switch(opType) {
       case UnopType::NEG_OP:
-        return IRBuilder_->CreateNeg(expr.LLVMVal);
+        return IRBuilder_->CreateNeg(operand);
       case UnopType::NOT_OP:
-        return IRBuilder_->CreateNot(expr.LLVMVal);
+        return IRBuilder_->CreateNot(operand);
       }
     }(unop->getOpType());
 
-    exprStack_.push({ expr.evalType, nullptr,
+    exprStack_.push({ exprInfo.evalType, nullptr,
                       LLVMVal, ValueCategory::RVALUE });
   }
 
@@ -350,8 +428,8 @@ public:
       }
     }(binop->getOpType());
 
-    auto lhs = firstOp.LLVMVal;
-    auto rhs = secondOp.LLVMVal;
+    llvm::Value* lhs = LValueToRValue(firstOp);
+    llvm::Value* rhs = LValueToRValue(secondOp);
     llvm::Value *LLVMVal = [&](BinopType opType) {
       switch(opType) {
       case BinopType::ADD_OP:
@@ -389,27 +467,30 @@ public:
     exprStack_.pop();
     semantic_->checkLetStatement(lhs.valCat, lhs.evalType, rhs.evalType,
                                  letStmt);
-    IRBuilder_->CreateStore(lhs.LLVMVal, rhs.LLVMVal);
+    llvm::Value* rhsVal = LValueToRValue(rhs);
+    IRBuilder_->CreateStore(rhsVal, lhs.LLVMVal);
   }
 
   void interVisit(const IfStatement *ifStmt, unsigned visitCnt) override {
+    auto &&parentFunc = IRBuilder_->GetInsertBlock()->getParent();
     switch(visitCnt) {
     case 1: {
       ExprInfo condExpr = exprStack_.top();
       exprStack_.pop();
       semantic_->checkIfStatement(condExpr.evalType, ifStmt);
-      auto BBTrue = llvm::BasicBlock::Create(*LLVMCtx_);
-      auto BBAfter = llvm::BasicBlock::Create(*LLVMCtx_);
-      IRBuilder_->SetInsertPoint(BBTrue);
+      auto BBTrue = llvm::BasicBlock::Create(*LLVMCtx_, "", parentFunc);
+      auto BBAfter = llvm::BasicBlock::Create(*LLVMCtx_, "", parentFunc);
       BBs.push(BBAfter);
       llvm::BasicBlock* BBNext = nullptr;
       if (ifStmt->getElseBody() != nullptr) {
-        BBNext = llvm::BasicBlock::Create(*LLVMCtx_);
+        BBNext = llvm::BasicBlock::Create(*LLVMCtx_, "", parentFunc);
         BBs.push(BBNext);
       } else {
         BBNext = BBAfter;
       }
-      IRBuilder_->CreateCondBr(condExpr.LLVMVal, BBTrue, BBNext);
+      llvm::Value* condVal = LValueToRValue(condExpr);
+      IRBuilder_->CreateCondBr(condVal, BBTrue, BBNext);
+      IRBuilder_->SetInsertPoint(BBTrue);
       break;
     }
     case 2: {
@@ -426,21 +507,24 @@ public:
   void postVisit(const IfStatement *ifStmt) override {
     auto BBNext = BBs.top();
     BBs.pop();
-    IRBuilder_->SetInsertPoint(BBNext); 
+    IRBuilder_->CreateBr(BBNext);
+    IRBuilder_->SetInsertPoint(BBNext);
   }
 
   void interVisit(const WhileStatement *whileStmt, unsigned visitCnt) override {
+    auto &&parentFunc = IRBuilder_->GetInsertBlock()->getParent();
     switch(visitCnt) {
     case 1: {
       ExprInfo condExpr = exprStack_.top();
       exprStack_.pop();
       semantic_->checkWhileStatement(condExpr.evalType, whileStmt);
-      auto BBAfter = llvm::BasicBlock::Create(*LLVMCtx_);
-      auto BBNext = llvm::BasicBlock::Create(*LLVMCtx_);
-      IRBuilder_->CreateCondBr(condExpr.LLVMVal, BBNext, BBAfter);
+      auto BBAfter = llvm::BasicBlock::Create(*LLVMCtx_, "", parentFunc);
+      auto BBNext = llvm::BasicBlock::Create(*LLVMCtx_, "", parentFunc);
+      llvm::Value* condVal = LValueToRValue(condExpr);
+      IRBuilder_->CreateCondBr(condVal, BBNext, BBAfter);
       IRBuilder_->SetInsertPoint(BBNext);
-      BBs.push(BBNext);
       BBs.push(BBAfter);
+      BBs.push(BBNext);
     }
     }
   }
@@ -449,11 +533,12 @@ public:
     whileStmt->getCondition()->accept(*this);
     ExprInfo updatedCondExpr = exprStack_.top();
     exprStack_.pop();
-    auto BBAfter = BBs.top();
-    BBs.pop();
     auto BBLoop = BBs.top();
     BBs.pop();
-    IRBuilder_->CreateCondBr(updatedCondExpr.LLVMVal, BBLoop, BBAfter);
+    auto BBAfter = BBs.top();
+    BBs.pop();
+    llvm::Value* condVal = LValueToRValue(updatedCondExpr);
+    IRBuilder_->CreateCondBr(condVal, BBLoop, BBAfter);
     IRBuilder_->SetInsertPoint(BBAfter);
   }
 
@@ -464,16 +549,22 @@ public:
 
   void postVisit(const ReturnStatement *retStmt) override {
     ExprInfo retExpr;
-    if (!exprStack_.empty()) {
+    if (currentSubrtn_->getRetType() && !exprStack_.empty()) {
       retExpr = exprStack_.top();
+      retExpr.LLVMVal = LValueToRValue(retExpr);
       exprStack_.pop();
     }
     semantic_->checkReturnStatement(retExpr.evalType, retStmt);
-    IRBuilder_->CreateRet(retExpr.LLVMVal);
+    if (currentSubrtn_->getRetType())
+      IRBuilder_->CreateStore(retExpr.LLVMVal, returnVal_);
+    IRBuilder_->CreateBr(BBReturn_);
+    auto &&func = IRBuilder_->GetInsertBlock()->getParent();
+    auto &&BBAfterRet = llvm::BasicBlock::Create(*LLVMCtx_, "", func);
+    IRBuilder_->SetInsertPoint(BBAfterRet);
   }
 
 private:
-  llvm::Type* convertTypeToLLVMType(const Type *type) {
+  llvm::Type* TypeToLLVMType(const Type *type) {
     switch (type->getTypeId()) {
     case Type::TypeId::IntTy:
       return llvm::Type::getInt32Ty(*LLVMCtx_);
@@ -508,8 +599,8 @@ private:
   llvm::Value *createArrayMemberAccess(const Type *elemType,
                                        llvm::Value *arrayVal,
                                        llvm::Value *indexVal) {
-    auto LLVMType = convertTypeToLLVMType(elemType);
-    return IRBuilder_->CreateGEP(LLVMType, arrayVal, { indexVal });
+    auto LLVMType = TypeToLLVMType(elemType);
+    return IRBuilder_->CreateGEP(LLVMType, arrayVal, indexVal);
   }
 
   llvm::Function *createFunction(const std::string &name, const Type *retType,
@@ -518,11 +609,11 @@ private:
     std::vector<llvm::Type *> llvmArgTypes;
     llvmArgTypes.reserve(argTypes.size());
     for (auto *type : argTypes) {
-      llvmArgTypes.push_back(convertTypeToLLVMType(type));
+      llvmArgTypes.push_back(TypeToLLVMType(type));
     }
 
     llvm::FunctionType *funcType = llvm::FunctionType::get(
-        convertTypeToLLVMType(retType), llvmArgTypes, false);
+        TypeToLLVMType(retType), llvmArgTypes, false);
     llvm::Function *func = llvm::Function::Create(
         funcType, llvm::Function::ExternalLinkage, name, LLVMModule_.get());
 
@@ -533,34 +624,54 @@ private:
   }
 
   llvm::Function* declareNewArrayFunc() {
-    return createFunction("newArray",
-                          ArrayType::getArrayTy(Type::getCharTy()),
-                          { "objectSize", "arraySize" },
-                          { Type::getIntTy(), Type::getIntTy() });
+    static llvm::Function* newArrayFunc =
+        createFunction("newArray", ArrayType::getArrayTy(Type::getCharTy()),
+                       { "objectSize", "arraySize" },
+                       { Type::getIntTy(), Type::getIntTy() });
+    return newArrayFunc;
   }
 
   llvm::Function* declareDeleteArrayFunc() {
-    return createFunction("deleteArray",
-                          Type::getNullTy(),
-                          { "array" },
-                          { ArrayType::getArrayTy(Type::getCharTy()) });
+    static llvm::Function* deleteArrayFunc =
+        createFunction("deleteArray", Type::getNullTy(), { "array" },
+                       { ArrayType::getArrayTy(Type::getCharTy()) });
+    return deleteArrayFunc;
   }
 
   llvm::Value* getSizeOf(const Type* type) {
     llvm::Type* llvmType =
         type->isClassTy() ?
         ClassToLLVMType_[static_cast<const ClassType*>(type)] : 
-        convertTypeToLLVMType(type);
+        TypeToLLVMType(type);
     auto intType = llvm::Type::getInt32Ty(*LLVMCtx_);
     auto sizeVal = IRBuilder_->CreateGEP(
         llvmType,
         llvm::Constant::getNullValue(llvm::PointerType::get(*LLVMCtx_, 0)),
-        { llvm::ConstantInt::get(intType, 1) });
+        llvm::ConstantInt::get(intType, 1));
     return IRBuilder_->CreateCast(llvm::Instruction::PtrToInt, 
                                   sizeVal, intType);
   }
 
-  const Type *symbolToEvalType(SymbolNode *sym) {
+  llvm::Value* LValueToRValue(ExprInfo& expr) {
+    if (expr.valCat == ValueCategory::LVALUE) {
+      return IRBuilder_->CreateLoad(
+          TypeToLLVMType(expr.evalType), expr.LLVMVal);
+    }
+    return expr.LLVMVal;
+  }
+
+  bool isLoadableType(const Type* type) {
+    switch (type->getTypeId()) {
+    case Type::TypeId::BoolTy:
+    case Type::TypeId::CharTy:
+    case Type::TypeId::IntTy:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  const Type *symbolToEvalType(SymbolNode* sym) {
     switch(sym->getSymbolType()) {
     case SymbolType::LOCAL_VARIABLE_SYM:
     case SymbolType::ARGUMENT_VARIABLE_SYM:
@@ -585,4 +696,6 @@ private:
   std::unique_ptr<SemanticChecker> semantic_;
   std::shared_ptr<ClassSymbol> currentClass_;
   std::shared_ptr<SubroutineSymbol> currentSubrtn_;
+  llvm::AllocaInst* returnVal_;
+  llvm::BasicBlock* BBReturn_;
 };

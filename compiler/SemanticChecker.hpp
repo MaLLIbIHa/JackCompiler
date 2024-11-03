@@ -1,8 +1,11 @@
 #pragma once
 #include "SymbolTable.hpp"
 #include "compiler/AST2.hpp"
+#include "compiler/NodeDescriptors.hpp"
 #include "sstream"
 #include <iostream>
+#include <memory>
+#include <stdexcept>
 
 enum class ValueCategory {
   NOT_VALUE,
@@ -17,6 +20,30 @@ public:
 
   void setCurrentSubroutine(const SubroutineSymbol *curSubrtn) {
     currentSubrtn_ = curSubrtn;
+  }
+
+  void checkMainFunc() {
+    auto mainClassSym =
+        std::static_pointer_cast<ClassSymbol>(globalTable_->find("Main"));
+    if (mainClassSym == nullptr) {
+      std::cerr << "Class \'Main\' doesn't provided" << std::endl;
+      throw std::runtime_error("Semantic error");
+    }
+    auto mainMemberSym =
+        std::static_pointer_cast<SubroutineSymbol>(
+            mainClassSym->findMember("main"));
+    if (mainMemberSym->getSymbolType() != SymbolType::SUBROUTINE_SYM ||
+        mainMemberSym->getKind() != SubroutineKind::FUNCTION_S) {
+      std::cerr << "Symbol \'Main::main\' must be a function"
+                << std::endl;
+      throw std::runtime_error("Semantic error");
+    }
+    if (!mainMemberSym->getRetType()->isIntTy()) {
+      std::cerr << "Return type of subroutine \'Main::main\' "
+                   "must be an \'int\'"
+                << std::endl;
+      throw std::runtime_error("Semantic error");
+    }
   }
 
   void checkSubroutine(const SubroutineDec *subrtnNode,
@@ -58,6 +85,7 @@ public:
       std::cerr << currentFuncNameErrMsg()
                 << lineErrMsg(nameExpr->getSourceLoc())
                 << "Undeclared name " << name << std::endl;
+      throw std::runtime_error("Semantic error");
     }
 
     if (currentSubrtn_->getKind() != SubroutineKind::FUNCTION_S) {
